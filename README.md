@@ -8,17 +8,10 @@ Esta app simula el flujo propuesto en el trabajo *“Propuesta de un asistente c
 ## Requisitos
 
 - [Node.js](https://nodejs.org/) 18 o superior (LTS recomendado).
-- Para usar **IA real**: [Claude Code](https://code.claude.com/docs/en/setup) instalado y con sesión iniciada con **tu suscripción de Claude** (Pro/Max). La app no usa ni guarda tokens: ejecuta el comando oficial `claude -p` en tu computadora y lee la respuesta, así que el consumo va a tu plan.
-  ```bash
-  claude          # la primera vez: iniciá sesión con tu cuenta de Claude y salí con /exit
-  claude auth status   # debe decir "loggedIn": true
-  ```
-- Si el login de `claude` no persiste (pasa a veces en Git Bash), usá un token: ejecutá `claude setup-token`, copiá el token y pegalo en `.env` como `CLAUDE_CODE_OAUTH_TOKEN=...`. Ese token lo usa sólo el comando `claude`. **No compartas el `.env`** (ya está en `.gitignore`; si mandás el proyecto comprimido, excluilo).
-- Sin Claude Code (o con `LLM_PROVIDER=mock`), la app funciona en **modo simulado** (reglas y respuestas predefinidas). También se puede usar una API key (`LLM_PROVIDER=api`).
+- Token de claude code que se guarda en el `.env` bajo `CLAUDE_CODE_OAUTH_TOKEN=...`. Si no se provee, se corre una versión simulada pero sin interacción con ningún llm 
 
 ## Cómo correrla
 
-**Git Bash (Windows) o cualquier bash:**
 
 ```bash
 cd /c/Users/masou/Dev/ia_medicina/asistente-dm2
@@ -26,19 +19,6 @@ cd /c/Users/masou/Dev/ia_medicina/asistente-dm2
 ```
 
 El script instala las dependencias la primera vez, crea `.env` y abre el navegador. Para frenar la app: `Ctrl+C`.
-
-**Manual (bash):**
-
-```bash
-npm install
-cp .env.example .env
-# (opcional) editar .env: LLM_PROVIDER, CLAUDE_CODE_MODEL   (p. ej.: notepad .env)
-npm start
-```
-
-**Alternativa sin bash:** doble clic en `iniciar.bat`.
-
-Después abrí <http://localhost:3000>.
 
 ## Guion sugerido para la demo
 
