@@ -1,0 +1,49 @@
+{
+  "id": "hta",
+  "nombre": "Hipertensión arterial",
+  "fuente": "Adaptación educativa simplificada a partir de guías nacionales de manejo de la hipertensión arterial en el primer nivel de atención (Ministerio de Salud). Contenido de demostración: debe ser validado por el equipo de salud.",
+  "fragmentos": [
+    {
+      "id": "HTA-01",
+      "tema": "presión arterial",
+      "titulo": "Qué es la hipertensión",
+      "palabras": "presion alta hipertension tension arterial que es",
+      "texto": "La hipertensión es la presión arterial elevada de forma sostenida. Suele no dar síntomas, por eso es importante medirla y tomar la medicación aunque te sientas bien. En personas con diabetes, controlar la presión protege el corazón, los riñones y la vista."
+    },
+    {
+      "id": "HTA-02",
+      "tema": "medir presión",
+      "titulo": "Cómo medir la presión en casa",
+      "palabras": "medir presion tensiometro como medir brazo sentada valor registro",
+      "texto": "Medí la presión sentada, después de 5 minutos de reposo, con la espalda apoyada y el brazo a la altura del corazón. No fumes ni tomes café 30 minutos antes. Hacé dos mediciones separadas por un minuto y registrá ambas. Podés enviarme el valor o una foto del tensiómetro."
+    },
+    {
+      "id": "HTA-03",
+      "tema": "enalapril",
+      "titulo": "Enalapril: cómo tomarlo y efectos frecuentes",
+      "palabras": "enalapril tos seca mareo efecto adverso presion pastilla",
+      "texto": "El enalapril se toma todos los días a la misma hora. Puede producir tos seca persistente o mareos al levantarse rápido. Si aparece hinchazón de labios, lengua o cara, es una urgencia. No suspendas la medicación por tu cuenta; si tenés molestias, consultá a tu médica."
+    },
+    {
+      "id": "HTA-04",
+      "tema": "dosis olvidada",
+      "titulo": "Si olvido una dosis de enalapril",
+      "palabras": "olvide enalapril dosis olvidada presion me olvide enalapril",
+      "texto": "Si olvidaste el enalapril, tomalo cuando te acuerdes en el mismo día. Si ya es casi la hora de la próxima dosis, salteá la olvidada. No tomes doble dosis."
+    },
+    {
+      "id": "HTA-05",
+      "tema": "alimentación",
+      "titulo": "Sal y presión",
+      "palabras": "sal sodio comida salada fiambre embutido presion",
+      "texto": "Reducir la sal ayuda a bajar la presión: no agregues sal en la mesa, cociná con hierbas y especias, y limitá fiambres, embutidos, quesos duros, snacks y caldos en cubo. Leé las etiquetas: los alimentos con sello 'Exceso en sodio' conviene evitarlos."
+    },
+    {
+      "id": "HTA-06",
+      "tema": "valores de alarma de presión",
+      "titulo": "Presión muy alta: cuándo consultar",
+      "palabras": "presion muy alta 180 110 dolor de cabeza urgencia",
+      "texto": "Si la presión supera 180/110 mmHg, repetí la medición luego de 5 minutos de reposo. Si se mantiene o aparece dolor de pecho, falta de aire, dolor de cabeza intenso, dificultad para hablar o debilidad de un lado del cuerpo, es una urgencia: llamá a emergencias."
+    }
+  ]
+}

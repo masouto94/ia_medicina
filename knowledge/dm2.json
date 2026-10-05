@@ -1,0 +1,98 @@
+{
+  "id": "dm2",
+  "nombre": "Diabetes mellitus tipo 2",
+  "fuente": "Adaptación educativa simplificada a partir de la Guía de Práctica Clínica Nacional sobre Prevención, Diagnóstico y Tratamiento de la DM2 (Ministerio de Salud, Res. 3877/2023). Contenido de demostración: debe ser validado por el equipo de salud.",
+  "fragmentos": [
+    {
+      "id": "DM2-01",
+      "tema": "qué es la diabetes",
+      "titulo": "Qué es la diabetes tipo 2",
+      "palabras": "diabetes azucar glucosa sangre que es enfermedad cronica insulina",
+      "texto": "La diabetes tipo 2 es una enfermedad crónica en la que el cuerpo no usa bien la insulina y el azúcar (glucosa) se acumula en la sangre. No tiene cura, pero se controla con alimentación saludable, actividad física, medicación y controles regulares. Mantener la glucemia en las metas acordadas con el médico reduce el riesgo de complicaciones en ojos, riñones, nervios, pies y corazón."
+    },
+    {
+      "id": "DM2-02",
+      "tema": "dosis olvidada",
+      "titulo": "Qué hacer si olvido una dosis de metformina",
+      "palabras": "olvide olvido dosis pastilla metformina tome no tome saltee doble duplicar me olvide anoche noche olvidé olvidado olvidada saltear",
+      "texto": "Si olvidaste una toma de metformina, tomala apenas te acuerdes, junto con algo de comida. Si ya falta poco para la próxima toma, salteá la dosis olvidada y seguí con el horario habitual. Nunca tomes dos dosis juntas para compensar. Si los olvidos son frecuentes, contale a tu médica: puede ayudarte a buscar una estrategia o ajustar el esquema."
+    },
+    {
+      "id": "DM2-03",
+      "tema": "metformina efectos",
+      "titulo": "Metformina: cómo tomarla y efectos frecuentes",
+      "palabras": "metformina efecto adverso diarrea nauseas estomago dolor panza gases malestar comida",
+      "texto": "La metformina se toma con las comidas o justo después, para reducir las molestias digestivas. Al comenzar o al aumentar la dosis pueden aparecer náuseas, diarrea o malestar estomacal, que suelen mejorar en pocas semanas. No suspendas la medicación por tu cuenta: si las molestias persisten o son intensas, consultá a tu médica. Avisá siempre que te indiquen un estudio con contraste o una cirugía."
+    },
+    {
+      "id": "DM2-04",
+      "tema": "hipoglucemia",
+      "titulo": "Hipoglucemia: cómo reconocerla",
+      "palabras": "hipoglucemia baja azucar bajo temblor sudor mareo hambre palpitaciones debilidad 70 mareada mareado transpirando transpiro transpiracion rara sudando temblando tembloroso",
+      "texto": "La hipoglucemia es una glucemia menor a 70 mg/dl. Puede dar temblor, sudoración fría, hambre intensa, palpitaciones, mareo, debilidad o irritabilidad. Con metformina sola es poco frecuente, pero puede ocurrir si se saltean comidas, se hace mucho ejercicio o se toma alcohol. Si tenés estos síntomas, medí tu glucemia si podés."
+    },
+    {
+      "id": "DM2-05",
+      "tema": "hipoglucemia",
+      "titulo": "Hipoglucemia: qué hacer (regla de 15)",
+      "palabras": "hipoglucemia que hago azucar caramelo jugo regla 15 corregir subir glucosa baja mareada mareado transpirando transpiro transpiracion rara sudando temblando tembloroso",
+      "texto": "Si tu glucemia es menor a 70 mg/dl y estás consciente: tomá 15 gramos de azúcar de absorción rápida (por ejemplo, 3 cucharaditas de azúcar en agua o medio vaso de jugo común, no dietético). Esperá 15 minutos y volvé a medir. Si sigue por debajo de 70, repetí. Cuando se normalice, comé algo si falta más de una hora para la próxima comida. Si hay confusión, desmayo o no mejora, es una urgencia: llamá a emergencias."
+    },
+    {
+      "id": "DM2-06",
+      "tema": "automonitoreo",
+      "titulo": "Automonitoreo de glucemia",
+      "palabras": "medir glucemia glucometro tira control cuando medir ayunas valor numero registro automonitoreo",
+      "texto": "Medí tu glucemia en los momentos que indicó tu médica (por ejemplo, en ayunas y 2 horas después de alguna comida). Lavate y secate bien las manos antes del pinchazo. Registrá cada valor: podés mandarme el número o una foto del glucómetro y queda guardado para tu médica. Un valor aislado alto no es motivo de alarma, pero varios valores fuera de la meta sí deben comentarse."
+    },
+    {
+      "id": "DM2-07",
+      "tema": "metas",
+      "titulo": "Metas de control habituales",
+      "palabras": "meta objetivo valor normal cuanto deberia dar rango hba1c hemoglobina glicosilada ayunas",
+      "texto": "Las metas se definen para cada persona. Como referencia general, muchas personas con DM2 tienen como objetivo una glucemia en ayunas entre 80 y 130 mg/dl, menos de 180 mg/dl dos horas después de comer y una hemoglobina glicosilada (HbA1c) menor a 7%. Tu médica configuró tus metas personales; si tenés dudas sobre ellas, consultalo en el próximo control."
+    },
+    {
+      "id": "DM2-08",
+      "tema": "alimentación",
+      "titulo": "Alimentación saludable",
+      "palabras": "comer comida alimentacion dieta puedo comer pan fruta azucar harinas plato verdura bebida gaseosa",
+      "texto": "Una guía práctica es el método del plato: la mitad con verduras, un cuarto con proteínas (carne magra, pollo, pescado, huevo o legumbres) y un cuarto con almidones (arroz, fideos, papa o pan, preferentemente integrales). Preferí agua en lugar de bebidas azucaradas o jugos. Las frutas están permitidas en porciones moderadas, mejor enteras que en jugo. Mantener horarios regulares de comida ayuda al control."
+    },
+    {
+      "id": "DM2-09",
+      "tema": "actividad física",
+      "titulo": "Actividad física",
+      "palabras": "ejercicio caminar actividad fisica deporte gimnasio cuanto caminar movimiento gimnasia hacer ejercicio pileta bicicleta",
+      "texto": "Se recomienda realizar al menos 150 minutos semanales de actividad física moderada, por ejemplo, caminar 30 minutos cinco días por semana, y evitar pasar mucho tiempo sentado. Usá calzado cómodo y revisá tus pies después. Si te sentís mal, con mareo o temblor durante el ejercicio, frená y medí tu glucemia."
+    },
+    {
+      "id": "DM2-10",
+      "tema": "cuidado de los pies",
+      "titulo": "Cuidado de los pies",
+      "palabras": "pie pies herida ampolla callo uña zapato descalzo hormigueo cuidado lesion corte",
+      "texto": "Revisá tus pies todos los días, incluso entre los dedos (podés usar un espejo). Lavalos con agua tibia y secalos bien. No camines descalza, usá medias sin costuras y calzado cómodo. No cortes callos por tu cuenta. Si aparece una herida, ampolla, cambio de color o una zona caliente o dolorosa, avisá a tu médica cuanto antes: podés enviarme una foto y se la hago llegar."
+    },
+    {
+      "id": "DM2-11",
+      "tema": "hiperglucemia",
+      "titulo": "Glucemia alta (hiperglucemia)",
+      "palabras": "alta alto azucar alta hiperglucemia sed orinar mucho cansancio vision borrosa 250 300",
+      "texto": "La glucemia alta puede dar sed intensa, ganas de orinar seguido, cansancio o visión borrosa. Un valor alto aislado puede deberse a una comida, estrés o una infección. Tomá agua, seguí con tu medicación y volvé a medir más tarde. Si los valores se mantienen por encima de 250 mg/dl o aparecen vómitos, somnolencia o dificultad para respirar, consultá de inmediato."
+    },
+    {
+      "id": "DM2-12",
+      "tema": "días de enfermedad",
+      "titulo": "Si estás enferma (fiebre, vómitos, diarrea)",
+      "palabras": "enferma fiebre gripe vomito diarrea infeccion resfrio no puedo comer",
+      "texto": "En días de enfermedad la glucemia puede alterarse. Tomá líquidos con frecuencia, medí la glucemia más seguido y tratá de comer porciones pequeñas. Si tenés vómitos o diarrea que no te permiten tomar líquidos, consultá a tu médica o a la guardia: en algunos casos hay que suspender transitoriamente la metformina, siempre por indicación médica."
+    },
+    {
+      "id": "DM2-13",
+      "tema": "controles",
+      "titulo": "Controles periódicos",
+      "palabras": "control analisis laboratorio oftalmologo ojos fondo de ojo riñon orina estudio cada cuanto",
+      "texto": "Además de las consultas, las personas con DM2 necesitan controles periódicos: HbA1c cada 3 a 6 meses, función renal y orina, perfil de colesterol, fondo de ojo anual y examen de los pies. Podés enviarme la foto o el PDF de tus análisis y quedan guardados para tu médica."
+    }
+  ]
+}

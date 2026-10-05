@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Asistente DM2 – Simulador</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>Asistente IA de seguimiento entre consultas</h1>
+      <span>Caso: Marta González (DM2 + HTA) · Dra. Lucía Fernández</span>
+    </div>
+    <span id="engine" class="engine">…</span>
+    <div class="clock">
+      <span class="muted small">Reloj simulado</span>
+      <span id="clock" class="time">—</span>
+      <button class="btn" id="btnNext" title="Avanza el reloj hasta la próxima toma y envía el recordatorio">⏭ Próxima toma</button>
+      <button class="btn" id="btnHour" title="Avanza 1 hora">+1 h</button>
+      <button class="btn" id="btnSeed" title="Genera 14 días de seguimiento de ejemplo">Simular 14 días</button>
+      <button class="btn danger" id="btnReset">Reiniciar</button>
+    </div>
+  </header>
+
+  <nav class="stepper" id="stepper"></nav>
+
+  <main class="layout">
+    <!-- ===================== Médica ===================== -->
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="role">Panel médico (web)</div>
+          <h2 style="font-size:15px">Dra. Lucía Fernández</h2>
+        </div>
+      </div>
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="config">1 · Configuración</button>
+        <button class="tab" data-tab="panel">2 · Panel de seguimiento <span id="tabBadge"></span></button>
+        <button class="tab" data-tab="evidencia">Evidencia</button>
+        <button class="tab" data-tab="fhir">HCE · FHIR · CDS Hooks</button>
+        <button class="tab" data-tab="trazas">Trazas del sistema</button>
+      </div>
+      <div class="tabpanel active" id="tab-config"></div>
+      <div class="tabpanel" id="tab-panel"></div>
+      <div class="tabpanel" id="tab-evidencia"></div>
+      <div class="tabpanel" id="tab-fhir"></div>
+      <div class="tabpanel" id="tab-trazas"></div>
+    </section>
+
+    <!-- ===================== Paciente ===================== -->
+    <aside class="phone-wrap">
+      <div class="role" style="margin:0 0 6px 6px">Canal de la paciente · Marta</div>
+      <div class="phone">
+        <div class="wa-head" id="waHead">
+          <div class="av">DL</div>
+          <div>
+            <div class="n">Asistente · Dra. Lucía</div>
+            <div class="s" id="waStatus">WhatsApp Business (simulado)</div>
+          </div>
+        </div>
+        <div class="wa-msgs" id="msgs"></div>
+        <div class="typing" id="typing"></div>
+        <div class="chips" id="chips"></div>
+        <div class="preview-bar" id="previewBar">
+          <img id="previewImg" alt="" />
+          <span id="previewName" class="small"></span>
+          <input id="caption" placeholder="Agregar un comentario (opcional)…" />
+          <button class="btn sm" id="cancelFile">✕</button>
+          <button class="btn sm primary" id="sendFile">Enviar</button>
+        </div>
+        <div class="wa-input">
+          <button class="round ghost" id="btnAttach" title="Adjuntar foto o informe">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <input type="text" id="txt" placeholder="Escribí un mensaje" autocomplete="off" />
+          <button class="round" id="btnSend" title="Enviar / grabar audio">
+            <svg id="icoMic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4"/></svg>
+            <svg id="icoSend" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+          </button>
+        </div>
+        <div class="attach-menu" id="attachMenu"></div>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,application/pdf" hidden />
+        <div class="overlay" id="phoneOverlay">Esperando que la Dra. Lucía configure el asistente…</div>
+      </div>
+      <div class="lasttrace card" style="padding:10px 12px" id="lastTrace"></div>
+    </aside>
+  </main>
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

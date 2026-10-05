@@ -1,0 +1,37 @@
+[
+  {
+    "archivo": "glucometro_182.jpg",
+    "titulo": "Glucómetro: 182 mg/dl",
+    "esperado": "Lee el valor y registra la glucemia (Observation + Media). Si lo subís a mano, agregá 'en ayunas' como comentario."
+  },
+  {
+    "archivo": "glucometro_48.jpg",
+    "titulo": "Glucómetro: 48 mg/dl",
+    "esperado": "Hipoglucemia grave → protocolo de alarma + aviso a la médica."
+  },
+  {
+    "archivo": "tensiometro_148_92.jpg",
+    "titulo": "Tensiómetro: 148/92",
+    "esperado": "Registra presión; supera el umbral → alerta baja."
+  },
+  {
+    "archivo": "blister_metformina.jpg",
+    "titulo": "Blíster de Metformina 850",
+    "esperado": "Identifica el remedio y confirma que coincide con el plan."
+  },
+  {
+    "archivo": "blister_glibenclamida.jpg",
+    "titulo": "Blíster de Glibenclamida 5",
+    "esperado": "Remedio NO indicado → derivación a la médica."
+  },
+  {
+    "archivo": "foto_pie_lesion.jpg",
+    "titulo": "Foto de lesión en el pie",
+    "esperado": "No la analiza: se envía a la médica (derivación + DocumentReference)."
+  },
+  {
+    "archivo": "informe_laboratorio.pdf",
+    "titulo": "Informe de laboratorio (PDF)",
+    "esperado": "Extrae HbA1c, glucemia, lípidos, creatinina → Observations; HbA1c fuera de meta → alerta."
+  }
+]
