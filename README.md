@@ -12,12 +12,24 @@ Esta app simula el flujo propuesto en el trabajo *“Propuesta de un asistente c
 
 ## Cómo correrla
 
+### Vía script de inicialización de bash
 
 ```bash
 ./iniciar.sh
 ```
 
 El script instala las dependencias la primera vez, crea `.env` y abre el navegador. Para frenar la app: `Ctrl+C`.
+
+### Manualmente
+
+Desde la terminal de windows se puede correr
+
+```bash
+cp .env.example .env
+npm install 
+node server.js
+```
+
 
 ## Guion sugerido para la demo
 
