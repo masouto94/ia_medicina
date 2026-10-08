@@ -6,6 +6,7 @@ const rag = require('./rag');
 const safety = require('./safety');
 const ALM = require('./alarmas');
 const M = require('./modulos');
+const G = require('./guardrails');
 const OE = require('./mocks/openevidence');
 const agenda = require('./mocks/agenda');
 const { normalize, fmtDateTime, fmtTime, uid } = require('./util');
@@ -50,9 +51,7 @@ function defaultConfig(hce) {
 
 // Lista de alarmas activas, tal como las configuró la médica (para el prompt del modelo)
 function alarmasTexto(cfg) {
-  ALM.ensure(cfg);
-  const act = cfg.alarmas.filter((a) => ALM.aplica(a, cfg));
-  return act.length ? act.map((a) => `   - ${a.nombre}: ${ALM.describir(a, cfg)}`).join('\n') : '   (ninguna activa)';
+  return ALM.textoParaModelo(cfg);
 }
 
 function planText(cfg) {
@@ -83,7 +82,11 @@ REGLAS OBLIGATORIAS:
    Los fragmentos IND-n son INDICACIONES PROPIAS DE LA MÉDICA para esta paciente: tienen prioridad sobre la base general. Si una indicación y un fragmento general difieren (p. ej., minutos de caminata), seguí la indicación de la médica y mencioná que es lo que ella te indicó.
 3. Si la duda es médica pero no está cubierta por los fragmentos, marcá "requiere_evidencia": true (el sistema consultará OpenEvidence y luego se reformulará la respuesta). No inventes la respuesta.
 4. Derivá a la médica ("derivar.necesario": true, con un resumen clínico breve y objetivo) cuando: el tema no está habilitado; hay un síntoma nuevo o persistente; un efecto adverso que preocupa; un pedido de cambio de tratamiento; o tenés dudas. En ese caso decile a la paciente que le pasaste la consulta a la médica.
-5. Señales de alarma: SÓLO las configuradas y activas por la médica (las pausadas no cuentan). Si el mensaje encaja en alguna, intencion "alarma":
+5. ALARMAS (sos la segunda capa de seguridad; la primera ya revisó el mensaje con reglas fijas).
+   Para decidir si hay alarma usá EXCLUSIVAMENTE: (a) la lista de alarmas activas de abajo y (b) los fragmentos recuperados. NO uses tu conocimiento médico general ni evidencia externa (OpenEvidence) para esta decisión.
+   Si el mensaje encaja en una alarma activa, aunque use otras palabras: intencion "alarma" y completá alarma = { es_alarma: true, regla_id: "<id entre corchetes>", fundamento: "<cita textual del mensaje que lo justifica>", valor: <número medido, obligatorio si la alarma es de umbral>, fuentes: ["CONFIG" y/o ids de fragmentos] }.
+   Si te parece urgente pero NO encaja en ninguna alarma activa: es_alarma false, derivar a la médica con prioridad "alta" y sin dar indicaciones médicas propias. Las alarmas pausadas no cuentan.
+   Alarmas activas:
 ${alarmasTexto(cfg)}
 ${M.instruccionesModelo(cfg).map((t) => `   ${t}`).join('\n')}
 6. Si la paciente informa un valor (glucemia, presión, peso) o confirma/omite una toma, completá "registro". Para glucemia, indicá el momento (ayunas, posprandial u otro) si se deduce.
@@ -128,7 +131,17 @@ const TOOL_RESPONDER = {
         },
         required: ['necesario'],
       },
-      alarma: { type: 'object', properties: { es_alarma: { type: 'boolean' }, motivo: { type: 'string' } }, required: ['es_alarma'] },
+      alarma: {
+        type: 'object',
+        properties: {
+          es_alarma: { type: 'boolean' },
+          regla_id: { type: 'string', description: 'Id de la alarma activa que encaja (entre corchetes en la lista)' },
+          fundamento: { type: 'string', description: 'Cita textual del mensaje de la paciente que justifica la alarma' },
+          valor: { type: 'number', description: 'Valor medido, si la alarma es de umbral' },
+          fuentes: { type: 'array', items: { type: 'string' }, description: '"CONFIG" y/o ids de fragmentos recuperados' },
+        },
+        required: ['es_alarma'],
+      },
     },
     required: ['intencion', 'tema', 'respuesta', 'fuentes_usadas', 'requiere_evidencia', 'registro', 'derivar', 'alarma'],
   },
@@ -210,9 +223,23 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
   inMsg.intent = out.intencion;
   inMsg.topic = out.tema;
 
-  // Doble control: si el modelo detecta alarma
+  // Doble control: si el modelo propone una alarma, se valida con los guardrails antes de aceptarla
   if (out.intencion === 'alarma' || (out.alarma && out.alarma.es_alarma)) {
-    return finishAlarm(inMsg, [out.alarma && out.alarma.motivo ? out.alarma.motivo : 'Señal de alarma detectada por el modelo'], text, pasos, sf);
+    const propuesta = { ...(out.alarma || {}), es_alarma: true };
+    const g = G.validarAlarmaModelo({ alarma: propuesta, evidencia: text, cfg, contextoIds: contexto.map((c) => c.id), oeConsultado: false });
+    pasos.push({ paso: 'Guardrail – alarma propuesta por el modelo', detalle: `${g.aceptada ? 'ACEPTADA' : 'RECHAZADA'} · ${g.checks.map((c) => `${c.ok ? '✓' : '✗'} ${c.check}: ${c.detalle}`).join(' | ')}` });
+    if (g.aceptada) {
+      const sfModelo = { ...sf, glucemia: sf.glucemia || (g.regla.variable === 'glucemia' ? Number(propuesta.valor) : null), origen: 'modelo', reglas: [{ id: g.regla.id, nombre: g.regla.nombre, detalle: `modelo: "${propuesta.fundamento}"` }], instrucciones: g.regla.instruccion ? [g.regla.instruccion] : [], guardrail: g.checks };
+      return finishAlarm(inMsg, [g.regla.nombre], text, pasos, sfModelo);
+    }
+    // rechazada: no se activa el protocolo de urgencia ni se usan fuentes externas, pero la médica recibe la consulta con prioridad alta
+    out.intencion = 'derivacion';
+    out.requiere_evidencia = false;
+    out.fuentes_usadas = [];
+    out.derivar = { necesario: true, prioridad: 'alta', motivo: 'Posible urgencia no validada por los guardrails', resumen_para_medico: `El modelo propuso una alarma que no pasó la validación (${g.checks.filter((c) => !c.ok).map((c) => c.check).join(', ')}). Mensaje de Marta: "${text}"` };
+    out.respuesta = 'Gracias por avisarme. Le pasé tu mensaje a la Dra. Lucía con prioridad para que lo vea cuanto antes. Si te sentís peor o aparece algo nuevo, no esperes: consultá a la guardia.';
+    out.sinEvidenciaEnSegundoPlano = true;
+    inMsg.intent = 'derivacion';
   }
 
   C.addTopic(out.tema);
@@ -243,7 +270,7 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
   }
 
   // 5b) Si el modelo derivó directamente, igual se consulta la evidencia en segundo plano para la médica
-  if (!out.requiere_evidencia && out.derivar && out.derivar.necesario) {
+  if (!out.requiere_evidencia && !out.sinEvidenciaEnSegundoPlano && out.derivar && out.derivar.necesario) {
     const ev = OE.consultar(text);
     if (ev.encontrado && ev.sugiere_cambio_tratamiento) {
       st.evidenceQueries.unshift({ ...ev, ts: st.clock, origen: 'paciente (en segundo plano)', pregunta: ev.query_anonimizada });
@@ -288,10 +315,11 @@ function finishAlarm(inMsg, motivos, text, pasos, sf) {
   const hipo = motivos.some((m) => /hipogluc|glucemia baja|az[uú]car baja/i.test(m)) || (sf && sf.glucemia && cfg.umbrales.hipo != null && sf.glucemia < cfg.umbrales.hipo);
   if (hipo && !instrucciones.includes(ALM.AZUCAR)) instrucciones.push(ALM.AZUCAR);
   if (sf && sf.glucemia) C.addObservation({ tipo: 'glucemia', valor: sf.glucemia, unidad: 'mg/dL', momento: 'otro', fuente: 'mensaje (alarma)' }, { check: false });
-  C.addAlert('alta', `ALARMA: ${motivos.join(', ')}`, { mensajeId: inMsg.id });
+  const origen = (sf && sf.origen) || 'regla';
+  C.addAlert('alta', `ALARMA: ${motivos.join(', ')}`, { mensajeId: inMsg.id, origen, reglas: ((sf && sf.reglas) || []).map((r) => r.id) });
   C.addReferral({ motivo: `Señal de alarma: ${motivos.join(', ')}`, resumen: `Mensaje de Marta (${fmtDateTime(st.clock)}): "${text}". Se le indicó acudir a emergencias.`, prioridad: 'alta', mensajeId: inMsg.id, texto: text });
-  C.addMessage({ from: 'asistente', kind: 'alarm', text: safety.MENSAJE_ALARMA(instrucciones), intent: 'alarma', reglas: (sf && sf.reglas) || [] });
-  pasos.push({ paso: 'Protocolo de alarma', detalle: 'No se intenta resolver: se indica emergencias y se notifica a la médica (alerta alta + derivación)' });
+  C.addMessage({ from: 'asistente', kind: 'alarm', text: safety.MENSAJE_ALARMA(instrucciones), intent: 'alarma', reglas: (sf && sf.reglas) || [], origenAlarma: origen });
+  pasos.push({ paso: 'Protocolo de alarma', detalle: `Disparada por ${origen === 'modelo' ? 'el modelo (validada por los guardrails)' : 'las reglas (primera capa)'}. No se intenta resolver: se indica emergencias y se notifica a la médica (alerta alta + derivación)` });
   S.trace(`ALARMA – mensaje de Marta: "${text.slice(0, 60)}"`, pasos);
   S.save();
 }

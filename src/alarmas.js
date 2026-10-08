@@ -194,4 +194,11 @@ function eliminar(cfg, id) {
   return a;
 }
 
-module.exports = { ensure, aplica, describir, evaluarReglas, crear, modificar, eliminar, valorUmbral, OPERADORES, origenes, AZUCAR };
+// Lista de alarmas activas para los prompts del modelo (con id, para que pueda citarlas)
+function textoParaModelo(cfg) {
+  ensure(cfg);
+  const act = cfg.alarmas.filter((a) => aplica(a, cfg));
+  return act.length ? act.map((a) => `   - [${a.id}] ${a.nombre}${a.tipo === 'umbral' ? ' (umbral)' : ''}: ${describir(a, cfg)}`).join('\n') : '   (ninguna activa)';
+}
+
+module.exports = { textoParaModelo, ensure, aplica, describir, evaluarReglas, crear, modificar, eliminar, valorUmbral, OPERADORES, origenes, AZUCAR };

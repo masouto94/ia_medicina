@@ -6,6 +6,8 @@ const C = require('./clinic');
 const llm = require('./llm');
 const safety = require('./safety');
 const M = require('./modulos');
+const ALM = require('./alarmas');
+const G = require('./guardrails');
 const { normalize, uid, fmtDateTime } = require('./util');
 
 const TOOL = {
@@ -35,6 +37,18 @@ const TOOL = {
       fecha_informe: { type: 'string', description: 'AAAA-MM-DD si figura' },
       respuesta_para_paciente: { type: 'string' },
       nota_para_medico: { type: 'string', description: 'Nota objetiva y breve para la médica (sin diagnóstico)' },
+      alarma: {
+        type: 'object',
+        description: 'Segunda capa de seguridad: sólo si la lectura o el comentario encajan en una alarma ACTIVA de la lista',
+        properties: {
+          es_alarma: { type: 'boolean' },
+          regla_id: { type: 'string' },
+          fundamento: { type: 'string', description: 'Cita textual del comentario o la lectura que la justifica' },
+          valor: { type: 'number', description: 'Valor leído, si la alarma es de umbral' },
+          fuentes: { type: 'array', items: { type: 'string' }, description: 'Sólo "CONFIG"' },
+        },
+        required: ['es_alarma'],
+      },
     },
     required: ['tipo', 'legible', 'respuesta_para_paciente', 'nota_para_medico'],
   },
@@ -51,6 +65,9 @@ Reglas:
 - herida_lesion (pie, piel, herida, uña, ampolla): NO describas la lesión, NO evalúes gravedad, NO recomiendes tratamientos. Respondé solo que la foto se envió a la Dra. Lucía para que la evalúe, y que si hay fiebre, mal olor, enrojecimiento que avanza o dolor intenso consulte a la guardia.
 - informe_laboratorio: transcribí cada valor tal como figura (analito normalizado, nombre original, valor, unidad) y la fecha. A la paciente NO le interpretes los resultados: decile que quedaron guardados para que la médica los revise.
 - otro: agradecé y explicá qué tipos de fotos podés registrar.
+ALARMAS (segunda capa de seguridad): decidí SÓLO con la lista de alarmas activas configuradas por la médica, sin usar tu conocimiento médico general ni fuentes externas. Si la lectura o el comentario encajan en una alarma activa, completá alarma = { es_alarma: true, regla_id, fundamento (cita textual del comentario o la lectura), valor (si es de umbral), fuentes: ["CONFIG"] }. Si no, es_alarma false. Las alarmas pausadas no cuentan.
+Alarmas activas:
+${ALM.textoParaModelo(cfg)}
 Respuestas en español rioplatense (voseo), breves y cálidas.`;
 }
 
@@ -136,26 +153,21 @@ async function handleFile({ path: filePath, mime, nombre, url, caption }) {
   C.addTopic(inMsg.topic);
   let reply = d.respuesta_para_paciente;
 
-  if (d.tipo === 'glucometro' && d.legible && d.glucemia_mg_dl) {
+  // primera capa: las alarmas configuradas se evalúan sobre la lectura (si la hay) y sobre el comentario que acompaña al archivo
+  const medicion = {};
+  if (d.tipo === 'glucometro' && d.legible && d.glucemia_mg_dl) medicion.glucemia = d.glucemia_mg_dl;
+  if (d.tipo === 'tensiometro' && d.legible && d.presion && d.presion.sistolica) medicion.presion = { sis: d.presion.sistolica, dia: d.presion.diastolica };
+  const sf = safety.evaluarMedicion(medicion, cfg, caption || '');
+  const lectura = medicion.glucemia ? `glucemia ${medicion.glucemia} mg/dl` : medicion.presion ? `presion ${medicion.presion.sis}/${medicion.presion.dia} mmHg` : '';
+  pasos.push({ paso: 'Filtro de seguridad', detalle: sf.alarma ? `ALARMA: ${sf.reglas.map((r) => `${r.nombre} [${r.id}] · ${r.detalle}`).join(' | ')}` : `Sin señales de alarma${lectura ? ` (${lectura})` : ''}${caption ? ' + comentario' : ''}` });
+
+  if (medicion.glucemia) {
     const mom = /ayuna/.test(normalize(caption || '')) ? 'ayunas' : /despues|almuerzo|cena|comi/.test(normalize(caption || '')) ? 'posprandial' : 'otro';
-    // primera capa: las alarmas configuradas también se evalúan sobre la lectura de la foto (+ el texto que la acompaña)
-    const sf = safety.evaluarMedicion({ glucemia: d.glucemia_mg_dl }, cfg, caption || '');
     const o = C.addObservation({ tipo: 'glucemia', valor: d.glucemia_mg_dl, unidad: 'mg/dL', momento: mom, fuente: 'foto de glucómetro', mediaId: media.id }, { check: !sf.alarma });
     pasos.push({ paso: 'Registro', detalle: `Observation glucemia ${o.valor} mg/dl + Media` });
-    if (sf.alarma) {
-      const { finishAlarm } = require('./assistant');
-      pasos.push({ paso: 'Filtro de seguridad', detalle: `ALARMA: ${sf.reglas.map((r) => `${r.nombre} [${r.id}] · ${r.detalle}`).join(' | ')}` });
-      return finishAlarm(inMsg, sf.motivos.map((m) => `${m}, foto de glucómetro`), `Foto de glucómetro: ${o.valor} mg/dl${caption ? ` – "${caption}"` : ''}`, pasos, sf);
-    }
-  } else if (d.tipo === 'tensiometro' && d.legible && d.presion && d.presion.sistolica) {
-    const sf = safety.evaluarMedicion({ presion: { sis: d.presion.sistolica, dia: d.presion.diastolica } }, cfg, caption || '');
+  } else if (medicion.presion) {
     C.addObservation({ tipo: 'presion', valor: d.presion.sistolica, valor2: d.presion.diastolica, pulso: d.presion.pulso, unidad: 'mmHg', fuente: 'foto de tensiómetro', mediaId: media.id }, { check: !sf.alarma });
     pasos.push({ paso: 'Registro', detalle: `Observation presión ${d.presion.sistolica}/${d.presion.diastolica} mmHg + Media` });
-    if (sf.alarma) {
-      const { finishAlarm } = require('./assistant');
-      pasos.push({ paso: 'Filtro de seguridad', detalle: `ALARMA: ${sf.reglas.map((r) => `${r.nombre} [${r.id}] · ${r.detalle}`).join(' | ')}` });
-      return finishAlarm(inMsg, sf.motivos.map((m) => `${m}, foto de tensiómetro`), `Foto de tensiómetro: ${d.presion.sistolica}/${d.presion.diastolica}${caption ? ` – "${caption}"` : ''}`, pasos, sf);
-    }
   } else if (d.tipo === 'blister_medicamento') {
     pasos.push({ paso: 'Verificación contra el plan', detalle: d.medicamento ? `${d.medicamento.nombre} ${d.medicamento.dosis || ''} → ${d.medicamento.coincide_con_plan ? 'coincide' : 'NO coincide'} con la medicación indicada` : 'No identificado' });
     if (d.medicamento && d.medicamento.coincide_con_plan === false) {
@@ -174,6 +186,21 @@ async function handleFile({ path: filePath, mime, nombre, url, caption }) {
     pasos.push({ paso: 'Registro', detalle: `${d.laboratorio.length} Observations de laboratorio + DocumentReference` });
   }
   if (d.legible === false && d.tipo !== 'otro') reply = reply || 'No pude leer bien el valor. ¿Me lo escribís?';
+
+  const { finishAlarm } = require('./assistant');
+  const descripcion = `${{ glucometro: 'Foto de glucómetro', tensiometro: 'Foto de tensiómetro' }[d.tipo] || `Archivo (${d.tipo})`}${lectura ? `: ${lectura}` : ''}${caption ? ` – "${caption}"` : ''}`;
+  if (sf.alarma) return finishAlarm(inMsg, sf.motivos, descripcion, pasos, sf);
+
+  // segunda capa: alarma propuesta por el modelo de visión, validada por los guardrails
+  if (d.alarma && d.alarma.es_alarma) {
+    const g = G.validarAlarmaModelo({ alarma: d.alarma, evidencia: `${caption || ''} ${lectura}`, cfg, contextoIds: [], oeConsultado: false });
+    pasos.push({ paso: 'Guardrail – alarma propuesta por el modelo', detalle: `${g.aceptada ? 'ACEPTADA' : 'RECHAZADA'} · ${g.checks.map((c) => `${c.ok ? '✓' : '✗'} ${c.check}: ${c.detalle}`).join(' | ')}` });
+    if (g.aceptada) {
+      return finishAlarm(inMsg, [g.regla.nombre], descripcion, pasos, { ...sf, origen: 'modelo', reglas: [{ id: g.regla.id, nombre: g.regla.nombre, detalle: `modelo: "${d.alarma.fundamento}"` }], instrucciones: g.regla.instruccion ? [g.regla.instruccion] : [], guardrail: g.checks });
+    }
+    C.addReferral({ motivo: 'Posible urgencia no validada por los guardrails', resumen: `El modelo propuso una alarma con el archivo ${nombre} que no pasó la validación (${g.checks.filter((c) => !c.ok).map((c) => c.check).join(', ')}). ${descripcion}`, prioridad: 'alta', mensajeId: inMsg.id, mediaUrl: url });
+    reply = `${reply}\nIgual le pasé tu mensaje a la Dra. Lucía con prioridad. Si te sentís peor, consultá a la guardia.`;
+  }
 
   C.addMessage({ from: 'asistente', kind: 'text', text: reply, intent: inMsg.intent, topic: inMsg.topic, referral: d.tipo === 'herida_lesion' });
   S.trace(`Archivo de Marta: ${nombre}`, pasos);

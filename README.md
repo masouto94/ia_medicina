@@ -13,7 +13,12 @@ La médica configura, durante la consulta, un asistente para cada paciente. Entr
 
 1. **Filtro de seguridad.** Antes de cualquier otra cosa, el mensaje se compara con las alarmas que configuró la médica: dolor de pecho, hemorragia, hipoglucemia grave y otras. Si alguna se dispara, el asistente no intenta resolver nada. Indica llamar a emergencias y avisa a la médica.
 2. **Búsqueda de información validada.** Si no hay alarma, se buscan las indicaciones propias de la médica y los fragmentos de las guías de cada patología activa (DM2, HTA). Es lo que se llama RAG.
-3. **Modelo de lenguaje.** Claude interpreta qué quiere la paciente (una duda, registrar un valor, pedir un turno, algo que tiene que ver la médica) y redacta la respuesta usando sólo esa información. Si detecta una urgencia que el filtro no vio, también activa la alarma.
+3. **Modelo de lenguaje.** Claude interpreta qué quiere la paciente (una duda, registrar un valor, pedir un turno, algo que tiene que ver la médica) y redacta la respuesta usando sólo esa información. Si detecta una urgencia que el filtro no vio, puede proponer una alarma, pero el sistema la acepta sólo si cumple todas estas condiciones:
+   - corresponde a una alarma activa configurada por la médica;
+   - está fundamentada en lo que dijo la paciente;
+   - no usó fuentes externas ni conocimiento general.
+
+   Si no las cumple, la consulta igual le llega a la médica con prioridad alta.
 4. **Acciones.** Según el caso, el asistente responde, registra el valor o la toma de medicación, reserva un turno, consulta evidencia científica o deriva la consulta a la médica.
 
 Todo lo que pasa queda disponible para la médica en su panel y se puede exportar a la historia clínica en formato estándar (HL7 FHIR).
@@ -148,7 +153,7 @@ node server.js
 | Componente | Estado |
 |---|---|
 | Asistente especializado (intención, respuesta, lectura de fotos/PDF, resumen) | **Real**: Claude a través de Claude Code (`claude -p`, con tu suscripción) y salida JSON validada. Cada respuesta tarda ~5–8 s. Si falla, se usa el respaldo simulado. |
-| Filtro de seguridad clínica | **Real**: alarmas configurables que se evalúan *antes* del LLM (primera capa, determinística), más un doble control del modelo. Las genéricas están en `knowledge/alarmas_genericas.json`. Desde *Configuración → Alarmas* la médica puede pausarlas, modificarlas, agregar nuevas o eliminar las que no son genéricas. |
+| Filtro de seguridad clínica | **Real**: alarmas configurables que se evalúan *antes* del LLM (primera capa, determinística), más un doble control del modelo (segunda capa) con guardrails en `src/guardrails.js`: el modelo sólo puede proponer alarmas activas, fundamentadas en el mensaje, con fuentes de la configuración o del RAG, con umbrales verificados y sin consultar OpenEvidence. Aplica a mensajes y a fotos. Las genéricas están en `knowledge/alarmas_genericas.json`. Desde *Configuración → Alarmas* la médica puede pausarlas, modificarlas, agregar nuevas o eliminar las que no son genéricas. |
 | Base especializada por patología + RAG | **Real**: fragmentos DM2 y HTA en `knowledge/`, con recuperación tipo BM25. |
 | Transcripción de audio | **Real** en el navegador (Web Speech API; Chrome o Edge). |
 | HCE / servidor FHIR | **Mock** (`src/mocks/hce.js`) |
@@ -183,6 +188,7 @@ src/vision.js          fotos e informes (registro, no diagnóstico)
 src/safety.js          señales de alarma y umbrales
 src/modulos.js         carga los módulos (conocimiento + configuración por patología)
 src/alarmas.js         alarmas configurables (genéricas + módulos + médica)
+src/guardrails.js      validación de las alarmas que propone el modelo (segunda capa)
 src/rag.js             recuperación sobre los fragmentos de los módulos
 src/clinic.js          observaciones, tomas, alertas, métricas (PDC)
 src/fhir.js            Bundle FHIR R4 + CDS Hooks
