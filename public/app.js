@@ -82,6 +82,7 @@ function render() {
   renderEvidence();
   renderFhir();
   renderTraces();
+  renderAlarmas();
   renderChat();
 }
 
@@ -163,7 +164,9 @@ function renderConfig() {
       </div>
       ${cfg ? `<div class="callout">Asistente activo: <b class="mono">${esc(cfg.id)}</b> · creado ${fDT(S.assistant.creado)}. Podés modificar la configuración y guardarla: los cambios se aplican en el próximo mensaje (no hay reentrenamiento).</div>` : ''}
       <div id="cfgForm"></div>
+      <div id="alarmasBox"></div>
     </div>`;
+  delete rendered.alarmasBox;
   if (!configDraft || !S.assistant || configDraft._from !== S.assistant.actualizado) {
     loadDraft(cfg);
   } else {
@@ -210,7 +213,9 @@ function renderForm() {
           <div class="inline-fields">
             ${num('umbrales.hipo', 'Hipoglucemia <')}${num('umbrales.hipoGrave', 'Hipo grave (alarma) <')}
             ${num('umbrales.hiper', 'Glucemia alta >')}${num('umbrales.hiperGrave', 'Glucemia marcada >')}
-            ${num('umbrales.paSisAlarma', 'PA sist. alarma ≥')}${num('umbrales.omisionesConsecutivas', 'Omisiones seguidas')}
+            ${num('umbrales.paSis', 'PA sist. alerta ≥')}${num('umbrales.paDia', 'PA diast. alerta ≥')}
+            ${num('umbrales.paSisAlarma', 'PA sist. alarma ≥')}${num('umbrales.paDiaAlarma', 'PA diast. alarma ≥')}
+            ${num('umbrales.omisionesConsecutivas', 'Omisiones seguidas')}
           </div>
         </div>
       </div>
@@ -273,6 +278,110 @@ function updateCfgJson() {
     const { _from, ...clean } = configDraft;
     pre.textContent = JSON.stringify(clean, null, 2);
   }
+}
+
+// ================= Alarmas (protocolo de urgencia) =================
+let alarmEdit = null; // {id, tipo} | null
+const ORIG_PILL = { generica: 'Genérica', medica: 'Médica', dm2: 'DM2', hta: 'HTA' };
+
+function alarmCfg() {
+  return S.assistant ? S.assistant.config : configDraft;
+}
+function valorAlarma(a, c) {
+  return a.umbralRef ? c.umbrales[a.umbralRef] : a.valor;
+}
+function describirAlarma(a, c) {
+  if (a.tipo === 'texto') return `Menciona: ${a.frases.map((f) => `“${esc(f)}”`).join(', ')}`;
+  const v = (CAT.alarmas.variables[a.variable] || {}).label || a.variable;
+  const u = (CAT.alarmas.variables[a.variable] || {}).unidad || '';
+  const sint = a.sintomas && a.sintomas.length ? ` <span class="muted">+ síntomas: ${a.sintomas.map((f) => `“${esc(f)}”`).join(', ')}</span>` : '';
+  return `<b>${esc(v)} ${esc(a.operador)} ${esc(valorAlarma(a, c))}</b> ${u}${a.umbralRef ? ` <span class="muted small">(umbral “${a.umbralRef}”)</span>` : ''}${sint}`;
+}
+
+function alarmEditor(a, c) {
+  const id = a ? a.id : 'nuevo';
+  const tipo = a ? a.tipo : alarmEdit.tipo;
+  const k = (f) => `alm-${id}-${f}`;
+  const V = CAT.alarmas.variables;
+  return `<div class="section" style="background:var(--surface-2);margin-top:8px">
+    <h3>${a ? `Modificar: ${esc(a.nombre)}` : 'Nueva alarma'} ${a && a.origen === 'generica' ? '<span class="hint">genérica: se puede pausar y modificar, no eliminar</span>' : ''}</h3>
+    <div class="inline-fields" style="grid-template-columns:2fr 1fr">
+      <label class="field">Nombre<input data-draft="${k('nombre')}" value="${esc(a ? a.nombre : '')}" placeholder="Ej.: Fiebre alta con escalofríos"></label>
+      <label class="field">Tipo<select data-draft="${k('tipo')}" ${a ? 'disabled' : 'data-alm-tipo'}>
+        <option value="texto" ${tipo === 'texto' ? 'selected' : ''}>Frases en el mensaje</option>
+        <option value="umbral" ${tipo === 'umbral' ? 'selected' : ''}>Umbral de una medición</option></select></label>
+    </div>
+    ${tipo === 'texto'
+      ? `<label class="field" style="margin-top:8px">Frases que la disparan (separadas por coma; sin tildes; puede ser el comienzo de una palabra)<textarea data-draft="${k('frases')}">${esc(a ? a.frases.join(', ') : '')}</textarea></label>`
+      : `<div class="inline-fields" style="margin-top:8px;grid-template-columns:1.3fr .7fr 1fr">
+          <label class="field">Medición<select data-draft="${k('variable')}" ${a ? 'disabled' : ''}>${Object.keys(V).map((v) => `<option value="${v}" ${a && a.variable === v ? 'selected' : ''}>${V[v].label} (${V[v].unidad})</option>`).join('')}</select></label>
+          <label class="field">Operador<select data-draft="${k('operador')}">${CAT.alarmas.operadores.map((o) => `<option ${(a ? a.operador : '<') === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+          <label class="field">Valor${a && a.umbralRef ? ` (umbral “${a.umbralRef}”)` : ''}<input type="number" data-draft="${k('valor')}" value="${a ? esc(valorAlarma(a, c)) : ''}"></label>
+        </div>
+        <label class="field" style="margin-top:8px">Sólo si además menciona alguno de estos síntomas (opcional, separados por coma)<textarea data-draft="${k('sintomas')}">${esc(a && a.sintomas ? a.sintomas.join(', ') : '')}</textarea></label>`}
+    <label class="field" style="margin-top:8px">Indicación inmediata para la paciente (opcional; se suma al mensaje de urgencia)<textarea data-draft="${k('instruccion')}" style="min-height:44px">${esc(a && a.instruccion ? a.instruccion : '')}</textarea></label>
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary" id="almSave" data-id="${id}">Guardar alarma</button><button class="btn" id="almCancel">Cancelar</button></div>
+  </div>`;
+}
+
+function renderAlarmas() {
+  const box = document.getElementById('alarmasBox');
+  if (!box || !CAT) return;
+  const c = alarmCfg();
+  if (!c || !c.alarmas) return setHTML('alarmasBox', '');
+  const editable = !!S.assistant;
+  const mods = c.modulos || [];
+  const rows = c.alarmas
+    .map((a) => {
+      const modInactivo = !['generica', 'medica'].includes(a.origen) && !mods.includes(a.origen);
+      const on = a.activa !== false;
+      return `<tr style="${!on || modInactivo ? 'opacity:.55' : ''}">
+        <td><label class="check"><input type="checkbox" data-alm-toggle="${a.id}" ${on ? 'checked' : ''} ${editable ? '' : 'disabled'}> ${on ? 'Activa' : 'Pausada'}</label></td>
+        <td><b>${esc(a.nombre)}</b><br><span class="pill">${ORIG_PILL[a.origen] || esc(a.origen)}</span>${modInactivo ? ' <span class="small muted">módulo inactivo</span>' : ''}</td>
+        <td class="small">${describirAlarma(a, c)}${a.instruccion ? `<div class="muted" style="margin-top:2px">↳ ${esc(a.instruccion)}</div>` : ''}</td>
+        <td style="white-space:nowrap">${editable ? `<button class="btn sm" data-alm-edit="${a.id}">Modificar</button> ${a.origen === 'generica' ? '<button class="btn sm" disabled title="Las genéricas no se pueden eliminar">Eliminar</button>' : `<button class="btn sm danger" data-alm-del="${a.id}">Eliminar</button>`}` : ''}</td>
+      </tr>${alarmEdit && alarmEdit.id === a.id ? `<tr><td colspan="4">${alarmEditor(a, c)}</td></tr>` : ''}`;
+    })
+    .join('');
+  const activas = c.alarmas.filter((a) => a.activa !== false && (['generica', 'medica'].includes(a.origen) || mods.includes(a.origen))).length;
+  setHTML(
+    'alarmasBox',
+    `<div class="section" style="margin-top:14px">
+      <h3>Alarmas (protocolo de urgencia) <span class="hint">${activas} activas de ${c.alarmas.length} · primera capa determinística, se evalúa antes del modelo</span></h3>
+      ${editable ? '<div class="small muted" style="margin-bottom:8px">Los cambios se aplican al instante. Si una alarma se dispara, el asistente no intenta resolver: indica emergencias y avisa a la médica.</div>' : '<div class="callout warn" style="margin-bottom:8px">Estas son las alarmas predeterminadas (genéricas + módulos activos). Generá el asistente para pausarlas, modificarlas o agregar nuevas.</div>'}
+      <table class="t"><tr><th style="width:96px">Estado</th><th>Alarma</th><th>Criterio</th><th></th></tr>${rows}</table>
+      ${editable ? (alarmEdit && alarmEdit.id === 'nuevo' ? alarmEditor(null, c) : '<button class="btn" id="almAdd" style="margin-top:10px">＋ Agregar alarma</button>') : ''}
+    </div>`
+  );
+}
+
+async function alarmOp(method, path, body, okMsg) {
+  try {
+    const r = await api(path, { method, body: body || {} });
+    const prev = S.assistant.config.umbrales;
+    if (configDraft) {
+      configDraft.alarmas = r.alarmas;
+      for (const key of Object.keys(r.umbrales)) if (r.umbrales[key] !== prev[key]) configDraft.umbrales[key] = r.umbrales[key];
+      configDraft._from = r.actualizado;
+    }
+    alarmEdit = null;
+    if (okMsg) toast(okMsg);
+    await refresh();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function alarmFormData(id, tipo) {
+  const g = (f) => {
+    const el = document.querySelector(`[data-draft="alm-${id}-${f}"]`);
+    return el ? el.value : undefined;
+  };
+  const d = { nombre: g('nombre'), instruccion: g('instruccion') };
+  if (tipo === 'texto') d.frases = g('frases');
+  else Object.assign(d, { variable: g('variable'), operador: g('operador'), valor: g('valor'), sintomas: g('sintomas') });
+  if (id === 'nuevo') d.tipo = tipo;
+  return d;
 }
 
 // ================= 2. Panel =================
@@ -786,6 +895,29 @@ document.addEventListener('click', async (e) => {
     switchTab('config');
     return;
   }
+  if (t.id === 'almAdd') {
+    alarmEdit = { id: 'nuevo', tipo: 'texto' };
+    return renderAlarmas();
+  }
+  if (t.id === 'almCancel') {
+    alarmEdit = null;
+    return renderAlarmas();
+  }
+  if (t.dataset.almEdit) {
+    const a = S.assistant.config.alarmas.find((x) => x.id === t.dataset.almEdit);
+    alarmEdit = a ? { id: a.id, tipo: a.tipo } : null;
+    return renderAlarmas();
+  }
+  if (t.dataset.almDel) {
+    const a = S.assistant.config.alarmas.find((x) => x.id === t.dataset.almDel);
+    if (!a || !confirm(`¿Eliminar la alarma “${a.nombre}”?`)) return;
+    return alarmOp('DELETE', `/api/alarms/${a.id}`, null, 'Alarma eliminada');
+  }
+  if (t.id === 'almSave') {
+    const id = t.dataset.id;
+    const datos = alarmFormData(id, alarmEdit.tipo);
+    return id === 'nuevo' ? alarmOp('POST', '/api/alarms', datos, 'Alarma agregada') : alarmOp('PUT', `/api/alarms/${id}`, datos, 'Alarma modificada');
+  }
   if (t.dataset.ack) return act(`/api/alert/${t.dataset.ack}/ack`);
   if (t.dataset.reply) {
     const inp = $(`[data-draft="rep-${t.dataset.reply}"]`);
@@ -845,6 +977,14 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.closest('#cfgForm')) readForm();
+  if (e.target.dataset.almToggle) {
+    const on = e.target.checked;
+    alarmOp('PUT', `/api/alarms/${e.target.dataset.almToggle}`, { activa: on }, on ? 'Alarma reactivada' : 'Alarma pausada');
+  }
+  if (e.target.dataset.almTipo != null && alarmEdit) {
+    alarmEdit.tipo = e.target.value;
+    renderAlarmas();
+  }
   if (e.target.id === 'fileInput') chooseFile(e.target.files[0]);
 });
 document.addEventListener('input', (e) => {

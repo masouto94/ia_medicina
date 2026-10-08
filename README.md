@@ -50,7 +50,7 @@ node server.js
 | Componente | Estado |
 |---|---|
 | Asistente especializado (intención, respuesta, lectura de fotos/PDF, resumen) | **Real**: Claude a través de Claude Code (`claude -p`, con tu suscripción) y salida JSON validada. Cada respuesta tarda ~5–8 s. Si falla, se usa el respaldo simulado. |
-| Filtro de seguridad clínica | **Real**: reglas determinísticas que se ejecutan *antes* del LLM, más un doble control del modelo. |
+| Filtro de seguridad clínica | **Real**: alarmas configurables que se evalúan *antes* del LLM (primera capa, determinística), más un doble control del modelo. Las genéricas están en `knowledge/alarmas_genericas.json`. Desde *Configuración → Alarmas* la médica puede pausarlas, modificarlas, agregar nuevas o eliminar las que no son genéricas. |
 | Base especializada por patología + RAG | **Real**: fragmentos DM2 y HTA en `knowledge/`, con recuperación tipo BM25. |
 | Transcripción de audio | **Real** en el navegador (Web Speech API; Chrome o Edge). |
 | HCE / servidor FHIR | **Mock** (`src/mocks/hce.js`) |

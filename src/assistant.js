@@ -4,6 +4,7 @@ const C = require('./clinic');
 const llm = require('./llm');
 const rag = require('./rag');
 const safety = require('./safety');
+const ALM = require('./alarmas');
 const OE = require('./mocks/openevidence');
 const agenda = require('./mocks/agenda');
 const { normalize, fmtDateTime, fmtTime, uid } = require('./util');
@@ -28,7 +29,7 @@ const NIVELES = {
 
 function defaultConfig(hce) {
   const med = (id) => hce.medicacion.find((m) => m.id.includes(id));
-  return {
+  return ALM.ensure({
     id: 'lucia-marta-assistant',
     paciente: hce.paciente,
     medico: hce.medico,
@@ -44,7 +45,14 @@ function defaultConfig(hce) {
     nivelLenguaje: 'simple',
     canal: 'whatsapp',
     indicaciones: 'Caminar 30 minutos al menos 5 días por semana. Medir glucemia en ayunas todos los días y 2 horas después del almuerzo los martes y viernes. Medir la presión 2 veces por semana.',
-  };
+  });
+}
+
+// Lista de alarmas activas, tal como las configuró la médica (para el prompt del modelo)
+function alarmasTexto(cfg) {
+  ALM.ensure(cfg);
+  const act = cfg.alarmas.filter((a) => ALM.aplica(a, cfg));
+  return act.length ? act.map((a) => `   - ${a.nombre}: ${ALM.describir(a, cfg)}`).join('\n') : '   (ninguna activa)';
 }
 
 function planText(cfg) {
@@ -74,7 +82,8 @@ REGLAS OBLIGATORIAS:
    Los fragmentos IND-n son INDICACIONES PROPIAS DE LA MÉDICA para esta paciente: tienen prioridad sobre la base general. Si una indicación y un fragmento general difieren (p. ej., minutos de caminata), seguí la indicación de la médica y mencioná que es lo que ella te indicó.
 3. Si la duda es médica pero no está cubierta por los fragmentos, marcá "requiere_evidencia": true (el sistema consultará OpenEvidence y luego se reformulará la respuesta). No inventes la respuesta.
 4. Derivá a la médica ("derivar.necesario": true, con un resumen clínico breve y objetivo) cuando: el tema no está habilitado; hay un síntoma nuevo o persistente; un efecto adverso que preocupa; un pedido de cambio de tratamiento; o tenés dudas. En ese caso decile a la paciente que le pasaste la consulta a la médica.
-5. Señales de alarma (dolor de pecho, falta de aire, confusión, desmayo, hipoglucemia grave < ${cfg.umbrales.hipoGrave} mg/dl, etc.): intencion "alarma".
+5. Señales de alarma: SÓLO las configuradas y activas por la médica (las pausadas no cuentan). Si el mensaje encaja en alguna, intencion "alarma":
+${alarmasTexto(cfg)}
    Una hipoglucemia entre ${cfg.umbrales.hipoGrave} y ${cfg.umbrales.hipo} mg/dl con la paciente consciente y sin confusión NO es alarma: respondé con la regla de 15 del fragmento de hipoglucemia (DM2-05), registrá el valor (el sistema avisa a la médica automáticamente) y pedile que vuelva a medir en 15 minutos.
 6. Si la paciente informa un valor (glucemia, presión, peso) o confirma/omite una toma, completá "registro". Para glucemia, indicá el momento (ayunas, posprandial u otro) si se deduce.
 7. Si pide, cambia o cancela un turno: intencion "turno" (el sistema ofrecerá horarios de la agenda).
@@ -159,6 +168,7 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
   const sf = safety.evaluar(text, cfg);
   pasos.push({ paso: 'Filtro de seguridad', detalle: sf.alarma ? `ALARMA: ${sf.motivos.join(', ')}` : 'Sin señales de alarma' });
   if (sf.alarma) {
+    pasos.push({ paso: 'Reglas disparadas', detalle: sf.reglas.map((r) => `${r.nombre} [${r.id}] · ${r.detalle}`).join(' | ') });
     return finishAlarm(inMsg, sf.motivos, text, pasos, sf);
   }
 
@@ -271,11 +281,15 @@ function finishAlarm(inMsg, motivos, text, pasos, sf) {
   inMsg.intent = 'alarma';
   inMsg.topic = 'señal de alarma';
   C.addTopic('señal de alarma');
-  const esHipo = motivos.some((m) => /hipogluc|glucemia baja|azúcar baja|azucar baja|valor bajo de glucemia/i.test(m)) || (sf && sf.glucemia && sf.glucemia < st.assistant.config.umbrales.hipo);
+  const cfg = st.assistant.config;
+  // indicaciones inmediatas: las de las reglas disparadas; si fue el modelo y hay glucemia baja, la del azúcar
+  const instrucciones = [...((sf && sf.instrucciones) || [])];
+  const hipo = motivos.some((m) => /hipogluc|glucemia baja|az[uú]car baja/i.test(m)) || (sf && sf.glucemia && sf.glucemia < cfg.umbrales.hipo);
+  if (hipo && !instrucciones.includes(ALM.AZUCAR)) instrucciones.push(ALM.AZUCAR);
   if (sf && sf.glucemia) C.addObservation({ tipo: 'glucemia', valor: sf.glucemia, unidad: 'mg/dL', momento: 'otro', fuente: 'mensaje (alarma)' }, { check: false });
   C.addAlert('alta', `ALARMA: ${motivos.join(', ')}`, { mensajeId: inMsg.id });
   C.addReferral({ motivo: `Señal de alarma: ${motivos.join(', ')}`, resumen: `Mensaje de Marta (${fmtDateTime(st.clock)}): "${text}". Se le indicó acudir a emergencias.`, prioridad: 'alta', mensajeId: inMsg.id, texto: text });
-  C.addMessage({ from: 'asistente', kind: 'alarm', text: safety.MENSAJE_ALARMA(motivos, esHipo), intent: 'alarma' });
+  C.addMessage({ from: 'asistente', kind: 'alarm', text: safety.MENSAJE_ALARMA(instrucciones), intent: 'alarma', reglas: (sf && sf.reglas) || [] });
   pasos.push({ paso: 'Protocolo de alarma', detalle: 'No se intenta resolver: se indica emergencias y se notifica a la médica (alerta alta + derivación)' });
   S.trace(`ALARMA – mensaje de Marta: "${text.slice(0, 60)}"`, pasos);
   S.save();

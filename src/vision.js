@@ -4,6 +4,7 @@ const fs = require('fs');
 const S = require('./state');
 const C = require('./clinic');
 const llm = require('./llm');
+const safety = require('./safety');
 const { normalize, uid, fmtDateTime } = require('./util');
 
 const TOOL = {
@@ -136,16 +137,24 @@ async function handleFile({ path: filePath, mime, nombre, url, caption }) {
 
   if (d.tipo === 'glucometro' && d.legible && d.glucemia_mg_dl) {
     const mom = /ayuna/.test(normalize(caption || '')) ? 'ayunas' : /despues|almuerzo|cena|comi/.test(normalize(caption || '')) ? 'posprandial' : 'otro';
-    const grave = d.glucemia_mg_dl < cfg.umbrales.hipoGrave;
-    const o = C.addObservation({ tipo: 'glucemia', valor: d.glucemia_mg_dl, unidad: 'mg/dL', momento: mom, fuente: 'foto de glucómetro', mediaId: media.id }, { check: !grave });
+    // primera capa: las alarmas configuradas también se evalúan sobre la lectura de la foto (+ el texto que la acompaña)
+    const sf = safety.evaluarMedicion({ glucemia: d.glucemia_mg_dl }, cfg, caption || '');
+    const o = C.addObservation({ tipo: 'glucemia', valor: d.glucemia_mg_dl, unidad: 'mg/dL', momento: mom, fuente: 'foto de glucómetro', mediaId: media.id }, { check: !sf.alarma });
     pasos.push({ paso: 'Registro', detalle: `Observation glucemia ${o.valor} mg/dl + Media` });
-    if (grave) {
+    if (sf.alarma) {
       const { finishAlarm } = require('./assistant');
-      return finishAlarm(inMsg, [`Hipoglucemia grave (${o.valor} mg/dl, foto de glucómetro)`], `Foto de glucómetro: ${o.valor} mg/dl`, pasos, null);
+      pasos.push({ paso: 'Filtro de seguridad', detalle: `ALARMA: ${sf.reglas.map((r) => `${r.nombre} [${r.id}] · ${r.detalle}`).join(' | ')}` });
+      return finishAlarm(inMsg, sf.motivos.map((m) => `${m}, foto de glucómetro`), `Foto de glucómetro: ${o.valor} mg/dl${caption ? ` – "${caption}"` : ''}`, pasos, sf);
     }
   } else if (d.tipo === 'tensiometro' && d.legible && d.presion && d.presion.sistolica) {
-    C.addObservation({ tipo: 'presion', valor: d.presion.sistolica, valor2: d.presion.diastolica, pulso: d.presion.pulso, unidad: 'mmHg', fuente: 'foto de tensiómetro', mediaId: media.id });
+    const sf = safety.evaluarMedicion({ presion: { sis: d.presion.sistolica, dia: d.presion.diastolica } }, cfg, caption || '');
+    C.addObservation({ tipo: 'presion', valor: d.presion.sistolica, valor2: d.presion.diastolica, pulso: d.presion.pulso, unidad: 'mmHg', fuente: 'foto de tensiómetro', mediaId: media.id }, { check: !sf.alarma });
     pasos.push({ paso: 'Registro', detalle: `Observation presión ${d.presion.sistolica}/${d.presion.diastolica} mmHg + Media` });
+    if (sf.alarma) {
+      const { finishAlarm } = require('./assistant');
+      pasos.push({ paso: 'Filtro de seguridad', detalle: `ALARMA: ${sf.reglas.map((r) => `${r.nombre} [${r.id}] · ${r.detalle}`).join(' | ')}` });
+      return finishAlarm(inMsg, sf.motivos.map((m) => `${m}, foto de tensiómetro`), `Foto de tensiómetro: ${d.presion.sistolica}/${d.presion.diastolica}${caption ? ` – "${caption}"` : ''}`, pasos, sf);
+    }
   } else if (d.tipo === 'blister_medicamento') {
     pasos.push({ paso: 'Verificación contra el plan', detalle: d.medicamento ? `${d.medicamento.nombre} ${d.medicamento.dosis || ''} → ${d.medicamento.coincide_con_plan ? 'coincide' : 'NO coincide'} con la medicación indicada` : 'No identificado' });
     if (d.medicamento && d.medicamento.coincide_con_plan === false) {

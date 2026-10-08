@@ -11,6 +11,7 @@ const A = require('./src/assistant');
 const V = require('./src/vision');
 const F = require('./src/fhir');
 const llm = require('./src/llm');
+const ALM = require('./src/alarmas');
 const hce = require('./src/mocks/hce');
 const OE = require('./src/mocks/openevidence');
 const { seed14 } = require('./src/seed');
@@ -53,6 +54,7 @@ const needAssistant = () => {
 // ---------- Estado ----------
 app.get('/api/state', (req, res) => {
   const st = S.get();
+  if (st.assistant) ALM.ensure(st.assistant.config); // migra configuraciones guardadas antes de las alarmas configurables
   res.json({
     ...st,
     busy: busy > 0,
@@ -65,6 +67,7 @@ app.get('/api/state', (req, res) => {
 
 app.get('/api/catalog', (req, res) => {
   res.json({
+    alarmas: { variables: ALM.VARIABLES, operadores: ALM.OPERADORES, origenes: ALM.ORIGENES },
     temas: A.TEMAS,
     niveles: A.NIVELES,
     modulos: MODULOS_DISPONIBLES.map((m) => ({ ...m, fuente: m.disponible ? getBase(m.id).fuente : null, fragmentos: m.disponible ? getBase(m.id).fragmentos.map((f) => ({ id: f.id, titulo: f.titulo })) : [] })),
@@ -116,7 +119,13 @@ app.post('/api/assistant', wrap((req) => {
   if (!cfg || !cfg.medicacion || !cfg.medicacion.length) throw new Error('Configuración inválida');
   const nuevo = !st.assistant;
   const prev = nuevo ? null : st.assistant.config;
-  st.assistant = { config: cfg, creado: nuevo ? st.clock : st.assistant.creado, actualizado: Date.now() };
+  // las alarmas se editan con sus propios endpoints (cada cambio queda registrado): el formulario no las pisa
+  if (prev) {
+    cfg.alarmas = prev.alarmas;
+    cfg.alarmasEliminadas = prev.alarmasEliminadas;
+  }
+  ALM.ensure(cfg);
+  st.assistant = { config: cfg, creado: nuevo ? st.clock : st.assistant.creado, actualizado: Date.now(), version: nuevo ? 1 : (st.assistant.version || 1) + 1 };
   // Si la médica cambia indicaciones u horarios, se le avisa a la paciente
   if (prev) {
     const avisos = [];
@@ -138,6 +147,36 @@ app.post('/api/assistant', wrap((req) => {
     { paso: 'Instancia del LLM', detalle: 'Sin reentrenamiento: modelo general parametrizado por el plan de cuidado (prompt de sistema + RAG)' },
   ]);
   S.save();
+}));
+
+// ---------- Alarmas (protocolo de urgencia) ----------
+function alarmChanged(accion, detalle) {
+  const st = S.get();
+  st.assistant.actualizado = Date.now();
+  st.assistant.version = (st.assistant.version || 1) + 1;
+  S.trace(`Alarma ${accion}`, [{ paso: 'Panel médico – alarmas', detalle }]);
+  S.save();
+  return { alarmas: st.assistant.config.alarmas, umbrales: st.assistant.config.umbrales, actualizado: st.assistant.actualizado, version: st.assistant.version };
+}
+app.post('/api/alarms', wrap((req) => {
+  needAssistant();
+  const cfg = S.get().assistant.config;
+  const a = ALM.crear(req.body || {});
+  cfg.alarmas.push(a);
+  return alarmChanged('agregada', `${a.nombre} [${a.id}]: ${ALM.describir(a, cfg)}`);
+}));
+app.put('/api/alarms/:id', wrap((req) => {
+  needAssistant();
+  const cfg = S.get().assistant.config;
+  const { antes, despues } = ALM.modificar(cfg, req.params.id, req.body || {});
+  const accion = 'activa' in (req.body || {}) && Object.keys(req.body).length === 1 ? (despues.activa ? 'reactivada' : 'pausada') : 'modificada';
+  return alarmChanged(accion, `${despues.nombre} [${despues.id}]${accion === 'modificada' ? `: ${ALM.describir(despues, cfg)}` : ''}`);
+}));
+app.delete('/api/alarms/:id', wrap((req) => {
+  needAssistant();
+  const cfg = S.get().assistant.config;
+  const a = ALM.eliminar(cfg, req.params.id);
+  return alarmChanged('eliminada', `${a.nombre} [${a.id}]`);
 }));
 
 // ---------- Chat de la paciente ----------
