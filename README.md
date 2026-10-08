@@ -160,7 +160,7 @@ npm test generative   # con el LLM real configurado (Claude Code o API key): ~2-
 | `logic` | Los tests están en `tests/logic/`: alarmas (frases, negación, umbrales, pausar, modificar, agregar, eliminar), guardrails (12 propuestas del modelo, 2 válidas y 10 tramposas), módulos (incluye una patología nueva agregada sólo con un JSON) y el recorrido completo de la app por la API. El recorrido corre en modo simulado y con un "Claude falso" (`tests/fixtures/fake-claude.js`) que devuelve respuestas tramposas a propósito. |
 | `generative` | `tests/generative/casos.json`: 14 casos clínicos contra el asistente con Claude real. Para cada paso se indica lo esperado: alarma sí/no y su origen, intención, derivación y prioridad, registro, fuente citada y consulta de evidencia. Al final informa la sensibilidad y los falsos positivos de las alarmas, y guarda el detalle en `tests/resultados/`. |
 
-Los tests usan una carpeta de estado temporal y un puerto propio, así que no tocan la demo en `data/`. La suite `generative` no es determinística; para ver la variabilidad se puede repetir cada caso: `GENERATIVE_REPEAT=3 npm test generative`. Para sumar un caso alcanza con agregarlo a `casos.json`; el formato está documentado en `tests/lib/plan.js`.
+Los tests usan una carpeta de estado temporal y un puerto propio, así que no tocan la demo en `data/`. La suite `generative` no es determinística; para ver la variabilidad se puede repetir cada caso: `GENERATIVE_REPEAT=3 npm test generative`. La guía completa para correr, crear, modificar y validar tests está en [`tests/README.md`](tests/README.md).
 
 ## Qué es real y qué es mock
 
