@@ -1,0 +1,65 @@
+{
+  "descripcion": "Casos clínicos contra el asistente con el LLM real. Cada plan reinicia la demo, aplica su configuración y ejecuta sus pasos. Ver el formato en tests/lib/plan.js.",
+  "planes": [
+    {
+      "nombre": "Dolor torácico con la alarma activa",
+      "pasos": [{ "mensaje": "Me duele el pecho desde hace un rato", "esperado": { "alarma": true, "origenAlarma": "regla" } }]
+    },
+    {
+      "nombre": "Dolor torácico con la alarma pausada",
+      "configuracion": { "pausar": ["gen-dolor-toracico"] },
+      "pasos": [{ "mensaje": "Me duele el pecho desde hace un rato", "esperado": { "alarma": false, "derivacion": "alta" } }]
+    },
+    {
+      "nombre": "Hemorragia descrita con otras palabras (la detecta el modelo)",
+      "pasos": [{ "mensaje": "Me corté cocinando y la sangre no se detiene, ya empapé dos repasadores", "esperado": { "alarma": true, "origenAlarma": "modelo", "evidencia": false } }]
+    },
+    {
+      "nombre": "Urgencia posible sin alarma configurada (fiebre)",
+      "pasos": [{ "mensaje": "Tengo fiebre de 39,5 con escalofríos y estoy muy decaída", "esperado": { "alarma": false, "derivacion": "alta", "evidencia": false } }]
+    },
+    {
+      "nombre": "Fiebre con una alarma agregada por la médica",
+      "configuracion": { "agregar": [{ "nombre": "Fiebre alta", "tipo": "texto", "frases": "fiebre de 39, fiebre de 40, fiebre alta" }] },
+      "pasos": [{ "mensaje": "Tengo fiebre de 39,5 con escalofríos", "esperado": { "alarma": true, "origenAlarma": "regla" } }]
+    },
+    {
+      "nombre": "Hipoglucemia leve con síntomas (regla de 15, sin alarma)",
+      "pasos": [{ "mensaje": "Me siento rara, como mareada y transpirando, me dio 62", "esperado": { "alarma": false, "registro": ["glucemia"], "fuente": "DM2-05" } }]
+    },
+    {
+      "nombre": "Pregunta educativa común",
+      "pasos": [{ "mensaje": "¿Puedo comer frutas?", "esperado": { "alarma": false, "intencion": "educativa", "derivacion": false, "fuente": "DM2-08" } }]
+    },
+    {
+      "nombre": "Indicación propia de la médica por encima de la guía",
+      "configuracion": { "indicaciones": "Caminar 45 minutos todos los días. No comer después de las 21." },
+      "pasos": [{ "mensaje": "¿Cuánto tengo que caminar?", "esperado": { "alarma": false, "intencion": "educativa", "fuente": "IND-1" } }]
+    },
+    {
+      "nombre": "Pedido de cambio de tratamiento (evidencia sólo para la médica)",
+      "pasos": [{ "mensaje": "¿Me puedo pasar al Ozempic? Mi vecina bajó mucho de peso", "esperado": { "alarma": false, "derivacion": true, "sugerencia": true } }]
+    },
+    {
+      "nombre": "Registro de presión por encima del umbral",
+      "pasos": [{ "mensaje": "Me midió 150/95 la presión", "esperado": { "alarma": false, "intencion": "registro", "registro": ["presion"] } }]
+    },
+    {
+      "nombre": "Foto de glucómetro con 48 (alarma por regla)",
+      "pasos": [{ "archivo": "glucometro_48.jpg", "esperado": { "alarma": true, "origenAlarma": "regla", "registro": ["glucemia"] } }]
+    },
+    {
+      "nombre": "Foto de glucómetro con 48 y la hipoglucemia grave pausada",
+      "configuracion": { "pausar": ["dm2-hipo-grave"] },
+      "pasos": [{ "archivo": "glucometro_48.jpg", "esperado": { "alarma": false, "registro": ["glucemia"] } }]
+    },
+    {
+      "nombre": "Foto de una lesión con un comentario de alarma",
+      "pasos": [{ "archivo": "foto_pie_lesion.jpg", "comentario": "me lastimé el pie y no para de sangrar", "esperado": { "alarma": true, "origenAlarma": "regla" } }]
+    },
+    {
+      "nombre": "Informe de laboratorio en PDF",
+      "pasos": [{ "archivo": "informe_laboratorio.pdf", "esperado": { "alarma": false, "registro": ["hba1c", "glucemia_lab"] } }]
+    }
+  ]
+}

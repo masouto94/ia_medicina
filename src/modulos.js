@@ -4,7 +4,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const DIR = path.join(__dirname, '..', 'knowledge');
+// KNOWLEDGE_DIR permite apuntar a otra carpeta de módulos (por ejemplo, en los tests)
+const DIR = process.env.KNOWLEDGE_DIR ? path.resolve(process.env.KNOWLEDGE_DIR) : path.join(__dirname, '..', 'knowledge');
 const NO_MODULO = new Set(['alarmas_genericas.json']);
 
 // Patologías previstas que todavía no tienen módulo (sólo para mostrarlas en el panel)
@@ -133,4 +134,4 @@ function catalogo() {
   ];
 }
 
-module.exports = { get, ids, activos, sugeridosPorDiagnostico, variables, ensureConfig, defaults, metasTexto, umbralesTexto, instruccionesModelo, evaluarAlerta, catalogo, UMBRALES_GENERALES };
+module.exports = { DIR, get, ids, activos, sugeridosPorDiagnostico, variables, ensureConfig, defaults, metasTexto, umbralesTexto, instruccionesModelo, evaluarAlerta, catalogo, UMBRALES_GENERALES };

@@ -8,7 +8,7 @@ const path = require('path');
 const { uid, normalize } = require('./util');
 const M = require('./modulos');
 
-const GENERICAS = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'knowledge', 'alarmas_genericas.json'), 'utf8'));
+const GENERICAS = JSON.parse(fs.readFileSync(path.join(M.DIR, 'alarmas_genericas.json'), 'utf8'));
 
 const AZUCAR = 'Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común).';
 

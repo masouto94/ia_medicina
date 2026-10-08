@@ -4,7 +4,8 @@
   "description": "Simulador del asistente conversacional basado en IA para adherencia y seguimiento de pacientes (caso Marta / Dra. Lucía, DM2)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node tests/run.js"
   },
   "engines": {
     "node": ">=18"

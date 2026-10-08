@@ -53,7 +53,10 @@ function run(args, { input = '', cwd, timeout = CLI_TIMEOUT } = {}) {
     const q = (a) => (a === '' ? '""' : /[\s"&|<>^]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
     let child;
     try {
-      child = spawn(CLI_BIN, IS_WIN ? args.map(q) : args, { cwd, shell: IS_WIN, env: process.env, windowsHide: true });
+      // un CLAUDE_CODE_BIN terminado en .js (p. ej. el Claude falso de los tests) se ejecuta con Node
+      child = CLI_BIN.endsWith('.js')
+        ? spawn(process.execPath, [CLI_BIN, ...args], { cwd, env: process.env, windowsHide: true })
+        : spawn(CLI_BIN, IS_WIN ? args.map(q) : args, { cwd, shell: IS_WIN, env: process.env, windowsHide: true });
     } catch (e) {
       return resolve({ code: -1, out: '', err: String(e.message || e) });
     }

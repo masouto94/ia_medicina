@@ -2,7 +2,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// DATA_DIR permite aislar el estado (por ejemplo, en los tests) sin tocar data/
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const FILE = path.join(DATA_DIR, 'state.json');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
