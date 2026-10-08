@@ -1,7 +1,7 @@
 {
   "id": "hta",
   "nombre": "Hipertensión arterial",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "snomed": [
     "38341003"
   ],
@@ -114,7 +114,11 @@
           "vision",
           "hablar",
           "pecho"
-        ]
+        ],
+        "snomed": {
+          "code": "24184005",
+          "display": "Finding of increased blood pressure"
+        }
       },
       {
         "id": "hta-pad-sintomas",
@@ -129,7 +133,11 @@
           "vision",
           "hablar",
           "pecho"
-        ]
+        ],
+        "snomed": {
+          "code": "24184005",
+          "display": "Finding of increased blood pressure"
+        }
       }
     ],
     "instruccionesModelo": []

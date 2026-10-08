@@ -6,7 +6,7 @@ const path = require('path');
 
 // KNOWLEDGE_DIR permite apuntar a otra carpeta de módulos (por ejemplo, en los tests)
 const DIR = process.env.KNOWLEDGE_DIR ? path.resolve(process.env.KNOWLEDGE_DIR) : path.join(__dirname, '..', 'knowledge');
-const NO_MODULO = new Set(['alarmas_genericas.json']);
+const NO_MODULO = new Set(['alarmas_genericas.json', 'terminologia.json']);
 
 // Patologías previstas que todavía no tienen módulo (sólo para mostrarlas en el panel)
 const PROXIMAMENTE = [

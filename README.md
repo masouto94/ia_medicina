@@ -174,7 +174,7 @@ Los tests usan una carpeta de estado temporal y un puerto propio, así que no to
 | OpenEvidence API | **Mock** (`src/mocks/openevidence.js`): respuestas predefinidas con citas reales; la consulta se anonimiza antes de enviarse. |
 | WhatsApp Business | **Mock**: la interfaz simula el canal. |
 | Agenda de turnos | **Mock** (`src/mocks/agenda.js`) |
-| Exportación FHIR R4 y servicio CDS Hooks | **Real**: `GET /api/fhir/bundle`, `GET /cds-services`, `POST /cds-services/seguimiento-entre-consultas`. |
+| Exportación FHIR R4 y servicio CDS Hooks | **Real**: `GET /api/fhir/bundle`, `GET /cds-services`, `POST /cds-services/seguimiento-entre-consultas`. Terminologías: SNOMED CT en diagnósticos, medicación (también en `MedicationStatement`) y motivos de derivación (`Communication.reasonCode`); LOINC en observaciones; UCUM en todas las unidades. Los códigos están en `knowledge/terminologia.json` y en cada alarma. |
 
 Si el indicador del motor dice "Modo simulado", al pasar el mouse por encima se ve el motivo.
 
@@ -206,9 +206,10 @@ src/guardrails.js      validación de las alarmas que propone el modelo (segunda
 src/rag.js             recuperación sobre los fragmentos de los módulos
 src/clinic.js          observaciones, tomas, alertas, métricas (PDC)
 src/fhir.js            Bundle FHIR R4 + CDS Hooks
+src/terminologia.js    SNOMED CT y UCUM para el export
 src/seed.js            14 días de datos de ejemplo
 src/mocks/             HCE, OpenEvidence, agenda
-knowledge/             módulos DM2 y HTA + alarmas genéricas
+knowledge/             módulos DM2 y HTA + alarmas genéricas + terminologías (SNOMED CT, UCUM)
 muestras/              archivos de prueba (ficticios)
 public/                interfaz
 tests/                 tests (npm test logic | generative)

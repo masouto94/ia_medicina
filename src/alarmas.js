@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { uid, normalize } = require('./util');
 const M = require('./modulos');
+const T = require('./terminologia');
 
 const GENERICAS = JSON.parse(fs.readFileSync(path.join(M.DIR, 'alarmas_genericas.json'), 'utf8'));
 
@@ -36,6 +37,9 @@ function ensure(cfg) {
   cfg.alarmasEliminadas = Array.isArray(cfg.alarmasEliminadas) ? cfg.alarmasEliminadas : [];
   M.ensureConfig(cfg); // metas y umbrales por defecto de los módulos activos
   const ids = new Set(cfg.alarmas.map((a) => a.id));
+  // completa el código SNOMED CT de las alarmas predeterminadas guardadas antes de que lo tuvieran
+  const defs = Object.fromEntries([...GENERICAS.alarmas, ...(cfg.modulos || []).flatMap((m) => porModulo(m))].map((a) => [a.id, a]));
+  for (const a of cfg.alarmas) if (!a.snomed && defs[a.id] && defs[a.id].snomed) a.snomed = { ...defs[a.id].snomed };
   for (const g of GENERICAS.alarmas) if (!ids.has(g.id)) cfg.alarmas.push(nueva(g, 'generica'));
   for (const mod of cfg.modulos || []) {
     for (const a of porModulo(mod)) {
@@ -135,6 +139,12 @@ function validar(a) {
   } else throw new Error('Tipo de alarma no válido');
 }
 
+// Código SNOMED CT de una alarma de la médica, elegido de la lista cerrada de motivos (knowledge/terminologia.json)
+function datosSnomed(clave) {
+  const m = T.motivo(clave);
+  return { code: m.code, display: m.display };
+}
+
 function crear(datos) {
   const a = {
     id: uid('alm'),
@@ -143,6 +153,7 @@ function crear(datos) {
     nombre: String(datos.nombre || '').trim(),
     tipo: datos.tipo,
     instruccion: String(datos.instruccion || '').trim() || undefined,
+    snomed: datosSnomed(datos.motivo),
   };
   if (a.tipo === 'texto') a.frases = limpiarFrases(datos.frases);
   else {
@@ -164,6 +175,7 @@ function modificar(cfg, id, cambios) {
   if ('activa' in cambios) a.activa = !!cambios.activa;
   if ('nombre' in cambios) a.nombre = String(cambios.nombre || '').trim();
   if ('instruccion' in cambios) a.instruccion = String(cambios.instruccion || '').trim() || undefined;
+  if ('motivo' in cambios && a.origen === 'medica') a.snomed = datosSnomed(cambios.motivo); // las predeterminadas conservan su código
   if (a.tipo === 'texto' && 'frases' in cambios) a.frases = limpiarFrases(cambios.frases);
   if (a.tipo === 'umbral') {
     if ('operador' in cambios) a.operador = cambios.operador;

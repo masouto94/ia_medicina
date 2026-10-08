@@ -7,6 +7,7 @@ const safety = require('./safety');
 const ALM = require('./alarmas');
 const M = require('./modulos');
 const G = require('./guardrails');
+const TERM = require('./terminologia');
 const OE = require('./mocks/openevidence');
 const agenda = require('./mocks/agenda');
 const { normalize, fmtDateTime, fmtTime, uid } = require('./util');
@@ -81,7 +82,7 @@ REGLAS OBLIGATORIAS:
 2. Tus respuestas educativas se basan SOLO en los FRAGMENTOS RECUPERADOS (citá sus ids en "fuentes_usadas") o en el plan de cuidado. No agregues información médica que no esté allí.
    Los fragmentos IND-n son INDICACIONES PROPIAS DE LA MÉDICA para esta paciente: tienen prioridad sobre la base general. Si una indicación y un fragmento general difieren (p. ej., minutos de caminata), seguí la indicación de la médica y mencioná que es lo que ella te indicó.
 3. Si la duda es médica pero no está cubierta por los fragmentos, marcá "requiere_evidencia": true (el sistema consultará OpenEvidence y luego se reformulará la respuesta). No inventes la respuesta.
-4. Derivá a la médica ("derivar.necesario": true, con un resumen clínico breve y objetivo) cuando: el tema no está habilitado; hay un síntoma nuevo o persistente; un efecto adverso que preocupa; un pedido de cambio de tratamiento; o tenés dudas. En ese caso decile a la paciente que le pasaste la consulta a la médica.
+4. Derivá a la médica ("derivar.necesario": true, con un resumen clínico breve y objetivo) cuando: el tema no está habilitado; hay un síntoma nuevo o persistente; un efecto adverso que preocupa; un pedido de cambio de tratamiento; o tenés dudas. En ese caso decile a la paciente que le pasaste la consulta a la médica. En "derivar.motivo_clave" elegí el motivo de esta lista: ${TERM.MOTIVOS.map((m) => `${m.clave} (${m.etiqueta})`).join('; ')}.
 5. ALARMAS (sos la segunda capa de seguridad; la primera ya revisó el mensaje con reglas fijas).
    Para decidir si hay alarma usá EXCLUSIVAMENTE: (a) la lista de alarmas activas de abajo y (b) los fragmentos recuperados. NO uses tu conocimiento médico general ni evidencia externa (OpenEvidence) para esta decisión.
    Si el mensaje encaja en una alarma activa, aunque use otras palabras: intencion "alarma" y completá alarma = { es_alarma: true, regla_id: "<id entre corchetes>", fundamento: "<cita textual del mensaje que lo justifica>", valor: <número medido, obligatorio si la alarma es de umbral>, fuentes: ["CONFIG" y/o ids de fragmentos] }.
@@ -126,6 +127,7 @@ const TOOL_RESPONDER = {
         properties: {
           necesario: { type: 'boolean' },
           motivo: { type: 'string' },
+          motivo_clave: { type: 'string', enum: TERM.MOTIVOS.map((m) => m.clave), description: 'Motivo codificado de la lista (se exporta como SNOMED CT)' },
           resumen_para_medico: { type: 'string' },
           prioridad: { type: 'string', enum: ['baja', 'media', 'alta'] },
         },
@@ -236,7 +238,7 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
     out.intencion = 'derivacion';
     out.requiere_evidencia = false;
     out.fuentes_usadas = [];
-    out.derivar = { necesario: true, prioridad: 'alta', motivo: 'Posible urgencia no validada por los guardrails', resumen_para_medico: `El modelo propuso una alarma que no pasó la validación (${g.checks.filter((c) => !c.ok).map((c) => c.check).join(', ')}). Mensaje de Marta: "${text}"` };
+    out.derivar = { necesario: true, prioridad: 'alta', codigo: (g.regla && g.regla.snomed) || TERM.motivo('consulta'), motivo: 'Posible urgencia no validada por los guardrails', resumen_para_medico: `El modelo propuso una alarma que no pasó la validación (${g.checks.filter((c) => !c.ok).map((c) => c.check).join(', ')}). Mensaje de Marta: "${text}"` };
     out.respuesta = 'Gracias por avisarme. Le pasé tu mensaje a la Dra. Lucía con prioridad para que lo vea cuanto antes. Si te sentís peor o aparece algo nuevo, no esperes: consultá a la guardia.';
     out.sinEvidenciaEnSegundoPlano = true;
     inMsg.intent = 'derivacion';
@@ -264,7 +266,7 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
       reply.text = await reformular(ev, text, cfg, pasos);
       if (ev.sugiere_cambio_tratamiento) {
         st.suggestions.push({ id: uid('sug'), ts: st.clock, estado: 'pendiente', origen: 'OpenEvidence (mock)', pregunta: text, tema: ev.tema, texto: ev.respuesta, citas: ev.citas });
-        out.derivar = { necesario: true, motivo: `Posible decisión terapéutica: ${ev.tema}`, resumen_para_medico: `Marta pregunta: "${text}". La evidencia recuperada sugiere evaluar un cambio de tratamiento (ver sugerencias).`, prioridad: 'media' };
+        out.derivar = { necesario: true, codigo: TERM.motivo('medicacion'), motivo: `Posible decisión terapéutica: ${ev.tema}`, resumen_para_medico: `Marta pregunta: "${text}". La evidencia recuperada sugiere evaluar un cambio de tratamiento (ver sugerencias).`, prioridad: 'media' };
       }
     }
   }
@@ -282,7 +284,7 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
 
   // 6) Derivación
   if (out.derivar && out.derivar.necesario) {
-    const ref = C.addReferral({ motivo: out.derivar.motivo || out.tema, resumen: out.derivar.resumen_para_medico || text, prioridad: out.derivar.prioridad || 'media', mensajeId: inMsg.id, texto: text });
+    const ref = C.addReferral({ motivo: out.derivar.motivo || out.tema, codigo: out.derivar.codigo || TERM.motivo(out.derivar.motivo_clave), resumen: out.derivar.resumen_para_medico || text, prioridad: out.derivar.prioridad || 'media', mensajeId: inMsg.id, texto: text });
     pasos.push({ paso: 'Módulo de derivación', detalle: `Derivación ${ref.prioridad} a la médica: ${ref.motivo}` });
     reply.referral = true;
   }
@@ -317,7 +319,8 @@ function finishAlarm(inMsg, motivos, text, pasos, sf) {
   if (sf && sf.glucemia) C.addObservation({ tipo: 'glucemia', valor: sf.glucemia, unidad: 'mg/dL', momento: 'otro', fuente: 'mensaje (alarma)' }, { check: false });
   const origen = (sf && sf.origen) || 'regla';
   C.addAlert('alta', `ALARMA: ${motivos.join(', ')}`, { mensajeId: inMsg.id, origen, reglas: ((sf && sf.reglas) || []).map((r) => r.id) });
-  C.addReferral({ motivo: `Señal de alarma: ${motivos.join(', ')}`, resumen: `Mensaje de Marta (${fmtDateTime(st.clock)}): "${text}". Se le indicó acudir a emergencias.`, prioridad: 'alta', mensajeId: inMsg.id, texto: text });
+  const reglaAlarma = ((sf && sf.reglas) || []).map((r) => cfg.alarmas.find((x) => x.id === r.id)).find((x) => x && x.snomed);
+  C.addReferral({ motivo: `Señal de alarma: ${motivos.join(', ')}`, codigo: reglaAlarma ? reglaAlarma.snomed : TERM.motivo('consulta'), resumen: `Mensaje de Marta (${fmtDateTime(st.clock)}): "${text}". Se le indicó acudir a emergencias.`, prioridad: 'alta', mensajeId: inMsg.id, texto: text });
   C.addMessage({ from: 'asistente', kind: 'alarm', text: safety.MENSAJE_ALARMA(instrucciones), intent: 'alarma', reglas: (sf && sf.reglas) || [], origenAlarma: origen });
   pasos.push({ paso: 'Protocolo de alarma', detalle: `Disparada por ${origen === 'modelo' ? 'el modelo (validada por los guardrails)' : 'las reglas (primera capa)'}. No se intenta resolver: se indica emergencias y se notifica a la médica (alerta alta + derivación)` });
   S.trace(`ALARMA – mensaje de Marta: "${text.slice(0, 60)}"`, pasos);
@@ -406,7 +409,7 @@ function mockClassify(text, chunks, cfg) {
     return { ...base, intencion: 'derivacion', tema: ev.tema.toLowerCase(), requiere_evidencia: true, respuesta: ev.resumen_para_paciente };
   }
   if (/hormigueo|ardor|dolor|me duele|vision borrosa|herida|sangr|hinchad|fiebre/.test(t) && !(top && top.score > 4)) {
-    return { ...base, intencion: 'derivacion', tema: 'síntoma nuevo', registro: { tipo: 'sintoma', detalle: text }, derivar: { necesario: true, motivo: 'Síntoma referido por la paciente', resumen_para_medico: `Marta refiere: "${text}"`, prioridad: 'media' }, respuesta: 'Gracias por contarme. Esto prefiero que lo vea la Dra. Lucía: ya le pasé tu consulta con un resumen y te va a responder por acá. Si empeora o aparece algo nuevo, consultá a la guardia.' };
+    return { ...base, intencion: 'derivacion', tema: 'síntoma nuevo', registro: { tipo: 'sintoma', detalle: text }, derivar: { necesario: true, motivo: 'Síntoma referido por la paciente', motivo_clave: /hormigueo|ardor/.test(t) ? 'sintoma_parestesia' : /fiebre/.test(t) ? 'sintoma_fiebre' : /herida/.test(t) ? 'herida' : /sangr/.test(t) ? 'sintoma_sangrado' : 'consulta', resumen_para_medico: `Marta refiere: "${text}"`, prioridad: 'media' }, respuesta: 'Gracias por contarme. Esto prefiero que lo vea la Dra. Lucía: ya le pasé tu consulta con un resumen y te va a responder por acá. Si empeora o aparece algo nuevo, consultá a la guardia.' };
   }
   if (/^(hola|buen(os|as)|gracias|ok|dale|genial|perfecto)\b/.test(t) && t.length < 40) {
     return { ...base, intencion: 'otro', tema: 'saludo', respuesta: '¡Hola, Marta! Estoy acá para ayudarte con tu tratamiento. Podés preguntarme dudas, mandarme tus valores o fotos del glucómetro, y pedir turnos.' };

@@ -1,7 +1,7 @@
 {
   "id": "dm2",
   "nombre": "Diabetes mellitus tipo 2",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "snomed": [
     "44054006"
   ],
@@ -131,7 +131,11 @@
         "variable": "glucemia",
         "operador": "<",
         "umbralRef": "hipoGrave",
-        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común)."
+        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común).",
+        "snomed": {
+          "code": "302866003",
+          "display": "Hypoglycemia"
+        }
       },
       {
         "id": "dm2-hipo-grave-referida",
@@ -142,7 +146,11 @@
           "no reacciona",
           "no se despierta"
         ],
-        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común)."
+        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común).",
+        "snomed": {
+          "code": "302866003",
+          "display": "Hypoglycemia"
+        }
       },
       {
         "id": "dm2-hipo-signos",
@@ -157,7 +165,11 @@
           "confund",
           "no me puedo levantar"
         ],
-        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común)."
+        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común).",
+        "snomed": {
+          "code": "302866003",
+          "display": "Hypoglycemia"
+        }
       },
       {
         "id": "dm2-hiper-sintomas",
@@ -171,7 +183,11 @@
           "somnolien",
           "dormida",
           "respir"
-        ]
+        ],
+        "snomed": {
+          "code": "80394007",
+          "display": "Hyperglycemia"
+        }
       }
     ],
     "instruccionesModelo": [

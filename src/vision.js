@@ -8,6 +8,7 @@ const safety = require('./safety');
 const M = require('./modulos');
 const ALM = require('./alarmas');
 const G = require('./guardrails');
+const TERM = require('./terminologia');
 const { normalize, uid, fmtDateTime } = require('./util');
 
 const TOOL = {
@@ -171,10 +172,10 @@ async function handleFile({ path: filePath, mime, nombre, url, caption }) {
   } else if (d.tipo === 'blister_medicamento') {
     pasos.push({ paso: 'Verificación contra el plan', detalle: d.medicamento ? `${d.medicamento.nombre} ${d.medicamento.dosis || ''} → ${d.medicamento.coincide_con_plan ? 'coincide' : 'NO coincide'} con la medicación indicada` : 'No identificado' });
     if (d.medicamento && d.medicamento.coincide_con_plan === false) {
-      C.addReferral({ motivo: 'Medicamento no incluido en el plan', resumen: `Marta envió foto de ${d.medicamento.nombre} ${d.medicamento.dosis || ''}, que no figura en su medicación indicada.`, prioridad: 'media', mensajeId: inMsg.id, mediaUrl: url });
+      C.addReferral({ motivo: 'Medicamento no incluido en el plan', codigo: TERM.motivo('medicacion'), resumen: `Marta envió foto de ${d.medicamento.nombre} ${d.medicamento.dosis || ''}, que no figura en su medicación indicada.`, prioridad: 'media', mensajeId: inMsg.id, mediaUrl: url });
     }
   } else if (d.tipo === 'herida_lesion') {
-    C.addReferral({ motivo: 'Foto de lesión para evaluación', resumen: d.nota_para_medico || 'La paciente envía una foto de una lesión.', prioridad: 'media', mensajeId: inMsg.id, mediaUrl: url });
+    C.addReferral({ motivo: 'Foto de lesión para evaluación', codigo: TERM.motivo('herida'), resumen: d.nota_para_medico || 'La paciente envía una foto de una lesión.', prioridad: 'media', mensajeId: inMsg.id, mediaUrl: url });
     pasos.push({ paso: 'Módulo de derivación', detalle: 'Foto enviada a la médica sin análisis automático (DocumentReference + Communication)' });
   } else if (d.tipo === 'informe_laboratorio' && Array.isArray(d.laboratorio)) {
     const fecha = d.fecha_informe ? Date.parse(`${d.fecha_informe}T09:00:00-03:00`) : st.clock;
@@ -198,7 +199,7 @@ async function handleFile({ path: filePath, mime, nombre, url, caption }) {
     if (g.aceptada) {
       return finishAlarm(inMsg, [g.regla.nombre], descripcion, pasos, { ...sf, origen: 'modelo', reglas: [{ id: g.regla.id, nombre: g.regla.nombre, detalle: `modelo: "${d.alarma.fundamento}"` }], instrucciones: g.regla.instruccion ? [g.regla.instruccion] : [], guardrail: g.checks });
     }
-    C.addReferral({ motivo: 'Posible urgencia no validada por los guardrails', resumen: `El modelo propuso una alarma con el archivo ${nombre} que no pasó la validación (${g.checks.filter((c) => !c.ok).map((c) => c.check).join(', ')}). ${descripcion}`, prioridad: 'alta', mensajeId: inMsg.id, mediaUrl: url });
+    C.addReferral({ motivo: 'Posible urgencia no validada por los guardrails', codigo: (g.regla && g.regla.snomed) || TERM.motivo('consulta'), resumen: `El modelo propuso una alarma con el archivo ${nombre} que no pasó la validación (${g.checks.filter((c) => !c.ok).map((c) => c.check).join(', ')}). ${descripcion}`, prioridad: 'alta', mensajeId: inMsg.id, mediaUrl: url });
     reply = `${reply}\nIgual le pasé tu mensaje a la Dra. Lucía con prioridad. Si te sentís peor, consultá a la guardia.`;
   }
 

@@ -19,6 +19,7 @@
 //         "origenAlarma": "regla",         // "regla" | "modelo"
 //         "intencion": ["derivacion"],     // una o varias intenciones aceptables
 //         "derivacion": "alta",            // true | false | "alta" | "media" | "baja"
+//         "codigoDerivacion": "386661006", // código SNOMED CT del motivo de alguna derivación del paso
 //         "registro": ["glucemia"],        // tipos de observación que se tienen que registrar
 //         "fuente": "IND-1",               // id de fragmento que la respuesta tiene que citar
 //         "evidencia": false,              // ¿se consultó OpenEvidence?
@@ -60,6 +61,7 @@ function obtener(antes, despues) {
     origenAlarma: alarmaMsg ? alarmaMsg.origenAlarma || 'regla' : null,
     reglasAlarma: alarmaMsg ? (alarmaMsg.reglas || []).map((r) => r.id) : [],
     derivacion: prio ? Object.keys(PRIORIDAD).find((k) => PRIORIDAD[k] === prio) : null,
+    codigosDerivacion: refs.map((r) => (r.codigo ? r.codigo.code : null)).filter(Boolean),
     registro: [...new Set(despues.observations.filter((o) => !antes.observations.some((x) => x.id === o.id)).map((o) => o.tipo))],
     fuentes: [...new Set(respuestas.flatMap((m) => (m.sources || []).map((s) => s.id)))],
     evidencia: despues.evidenceQueries.length > antes.evidenceQueries.length,
@@ -83,6 +85,7 @@ function comparar(esp = {}, obt) {
     const ok = e === true ? !!obt.derivacion : e === false ? !obt.derivacion : obt.derivacion === e;
     if (!ok) f('derivacion', e, obt.derivacion);
   }
+  if ('codigoDerivacion' in esp && !obt.codigosDerivacion.includes(esp.codigoDerivacion)) f('codigoDerivacion', esp.codigoDerivacion, obt.codigosDerivacion);
   for (const t of [].concat(esp.registro || [])) if (!obt.registro.includes(t)) f('registro', t, obt.registro);
   if ('fuente' in esp && !obt.fuentes.includes(esp.fuente)) f('fuente', esp.fuente, obt.fuentes);
   if ('evidencia' in esp && esp.evidencia !== obt.evidencia) f('evidencia', esp.evidencia, obt.evidencia);

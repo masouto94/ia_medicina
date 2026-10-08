@@ -16,6 +16,7 @@ const hce = require('./src/mocks/hce');
 const OE = require('./src/mocks/openevidence');
 const { seed14 } = require('./src/seed');
 const MOD = require('./src/modulos');
+const TERM = require('./src/terminologia');
 const { uid, fmtDateTime } = require('./src/util');
 
 const app = express();
@@ -72,6 +73,7 @@ app.get('/api/catalog', (req, res) => {
     niveles: A.NIVELES,
     modulos: MOD.catalogo(),
     umbralesGenerales: MOD.UMBRALES_GENERALES,
+    motivos: TERM.MOTIVOS,
   });
 });
 

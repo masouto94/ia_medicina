@@ -31,7 +31,8 @@ tests/
 │   ├── alarmas.test.js       primera capa: reglas de alarma
 │   ├── guardrails.test.js    segunda capa: validación de las alarmas que propone el modelo
 │   ├── modulos.test.js       módulos = conocimiento + configuración
-│   └── flujo.test.js         recorrido completo por la API (modo simulado y Claude falso)
+│   ├── flujo.test.js         recorrido completo por la API (modo simulado y Claude falso)
+│   └── fhir.test.js          export FHIR: SNOMED CT en motivos y medicación, UCUM en unidades
 ├── generative/
 │   ├── casos.json            casos clínicos con resultado esperado
 │   └── generativo.test.js    los ejecuta con el LLM real y arma el reporte
@@ -139,6 +140,7 @@ Es lo más común. Se agrega un plan a `tests/generative/casos.json`:
 | `origenAlarma` | `"regla"` / `"modelo"` | Quién la disparó: la primera capa o el modelo (validado por los guardrails) |
 | `intencion` | `"educativa"`, `"registro"`, `"adherencia"`, `"turno"`, `"derivacion"`, `"alarma"`, `"otro"`, o una lista de aceptables | Cómo se clasificó el mensaje |
 | `derivacion` | `true`, `false`, `"alta"`, `"media"`, `"baja"` | Si se derivó a la médica y con qué prioridad (la más alta del paso) |
+| `codigoDerivacion` | código SNOMED CT, p. ej. `"386661006"` | Que alguna derivación del paso tenga ese motivo codificado (lista en `knowledge/terminologia.json`) |
 | `registro` | lista, p. ej. `["glucemia"]`, `["presion"]`, `["hba1c"]` | Observaciones que se tienen que haber registrado |
 | `fuente` | id de fragmento, p. ej. `"DM2-05"` o `"IND-1"` | Que la respuesta cite esa fuente. `IND-n` es la n-ésima indicación propia de la médica |
 | `evidencia` | `true` / `false` | Si se consultó OpenEvidence |

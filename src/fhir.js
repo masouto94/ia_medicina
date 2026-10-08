@@ -3,6 +3,7 @@ const S = require('./state');
 const C = require('./clinic');
 const hce = require('./mocks/hce');
 const M = require('./modulos');
+const TERM = require('./terminologia');
 const { fmtDateTime } = require('./util');
 
 const P = { reference: `Patient/${hce.PATIENT_ID}`, display: 'Marta González' };
@@ -45,7 +46,7 @@ function bundle(baseUrl = 'http://localhost:3000') {
         description: { text: g.text },
         subject: P,
         addresses: (M.get(g.modulo).snomed || []).map((c) => ({ display: `SNOMED CT ${c}` })),
-        target: g.loinc ? [{ measure: { coding: [{ system: 'http://loinc.org', code: g.loinc }] }, detailRange: { low: g.low != null ? { value: g.low, unit: g.unit } : undefined, high: g.high != null ? { value: g.high, unit: g.unit } : undefined } }] : undefined,
+        target: g.loinc ? [{ measure: { coding: [{ system: 'http://loinc.org', code: g.loinc }] }, detailRange: { low: g.low != null ? TERM.cantidad(g.low, g.unit) : undefined, high: g.high != null ? TERM.cantidad(g.high, g.unit) : undefined } }] : undefined,
       });
     }
     add({
@@ -65,13 +66,16 @@ function bundle(baseUrl = 'http://localhost:3000') {
     });
   }
 
+  // la medicación de cada toma se codifica igual que la MedicationRequest de la HCE (SNOMED CT)
+  const medConcepto = {};
+  for (const r of src.filter((x) => x.resourceType === 'MedicationRequest')) medConcepto[r.id.replace(/^medreq-/, '')] = r.medicationCodeableConcept;
   for (const d of st.doses.filter((x) => x.estado !== 'pendiente')) {
     add({
       resourceType: 'MedicationStatement',
       id: d.id,
       status: d.estado === 'tomada' ? 'completed' : 'not-taken',
       statusReason: d.estado === 'sin_respuesta' ? [{ text: 'Sin confirmación de la paciente' }] : undefined,
-      medicationCodeableConcept: { text: d.nombre },
+      medicationCodeableConcept: medConcepto[d.medId] || { text: d.nombre },
       subject: P,
       effectiveDateTime: iso(d.programada),
       dateAsserted: d.respondida ? iso(d.respondida) : undefined,
@@ -96,10 +100,10 @@ function bundle(baseUrl = 'http://localhost:3000') {
     };
     if (o.tipo === 'presion') {
       r.component = [
-        { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Sistólica' }] }, valueQuantity: { value: o.valor, unit: 'mmHg' } },
-        { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastólica' }] }, valueQuantity: { value: o.valor2, unit: 'mmHg' } },
+        { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Sistólica' }] }, valueQuantity: TERM.cantidad(o.valor, 'mmHg') },
+        { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastólica' }] }, valueQuantity: TERM.cantidad(o.valor2, 'mmHg') },
       ];
-    } else r.valueQuantity = { value: o.valor, unit: o.unidad };
+    } else r.valueQuantity = TERM.cantidad(o.valor, o.unidad);
     add(r);
   }
 
@@ -116,7 +120,7 @@ function bundle(baseUrl = 'http://localhost:3000') {
   }
 
   for (const r of st.referrals) {
-    add({ resourceType: 'Communication', id: r.id, status: r.estado === 'pendiente' ? 'in-progress' : 'completed', category: [{ text: 'Derivación del asistente a la médica' }], priority: r.prioridad === 'alta' ? 'urgent' : 'routine', subject: P, sent: iso(r.ts), sender: { display: 'lucia-marta-assistant' }, recipient: [DR], reasonCode: [{ text: r.motivo }], payload: [{ contentString: r.resumen }] });
+    add({ resourceType: 'Communication', id: r.id, status: r.estado === 'pendiente' ? 'in-progress' : 'completed', category: [{ text: 'Derivación del asistente a la médica' }], priority: r.prioridad === 'alta' ? 'urgent' : 'routine', subject: P, sent: iso(r.ts), sender: { display: 'lucia-marta-assistant' }, recipient: [DR], reasonCode: [TERM.concepto(r.codigo || TERM.motivo('consulta'), r.motivo)], payload: [{ contentString: r.resumen }] });
     if (r.respuesta) add({ resourceType: 'Communication', id: `${r.id}-resp`, status: 'completed', inResponseTo: [{ reference: `Communication/${r.id}` }], subject: P, sent: iso(r.respondida), sender: DR, recipient: [P], payload: [{ contentString: r.respuesta }] });
   }
   for (const a of st.appointments) {

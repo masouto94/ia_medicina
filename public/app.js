@@ -322,6 +322,7 @@ function alarmEditor(a, c) {
           <label class="field">Valor${a && a.umbralRef ? ` (umbral “${a.umbralRef}”)` : ''}<input type="number" data-draft="${k('valor')}" value="${a ? esc(valorAlarma(a, c)) : ''}"></label>
         </div>
         <label class="field" style="margin-top:8px">Sólo si además menciona alguno de estos síntomas (opcional, separados por coma)<textarea data-draft="${k('sintomas')}">${esc(a && a.sintomas ? a.sintomas.join(', ') : '')}</textarea></label>`}
+    ${!a || a.origen === 'medica' ? `<label class="field" style="margin-top:8px">Motivo codificado (SNOMED CT, para el export a la HCE)<select data-draft="${k('motivo')}">${CAT.motivos.map((m) => `<option value="${m.clave}" ${a && a.snomed && a.snomed.code === m.code ? 'selected' : ''}>${esc(m.etiqueta)} — ${m.code} ${esc(m.display)}</option>`).join('')}</select></label>` : ''}
     <label class="field" style="margin-top:8px">Indicación inmediata para la paciente (opcional; se suma al mensaje de urgencia)<textarea data-draft="${k('instruccion')}" style="min-height:44px">${esc(a && a.instruccion ? a.instruccion : '')}</textarea></label>
     <div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary" id="almSave" data-id="${id}">Guardar alarma</button><button class="btn" id="almCancel">Cancelar</button></div>
   </div>`;
@@ -341,7 +342,7 @@ function renderAlarmas() {
       return `<tr style="${!on || modInactivo ? 'opacity:.55' : ''}">
         <td><label class="check"><input type="checkbox" data-alm-toggle="${a.id}" ${on ? 'checked' : ''} ${editable ? '' : 'disabled'}> ${on ? 'Activa' : 'Pausada'}</label></td>
         <td><b>${esc(a.nombre)}</b><br><span class="pill">${ORIG_PILL[a.origen] || esc(a.origen)}</span>${modInactivo ? ' <span class="small muted">módulo inactivo</span>' : ''}</td>
-        <td class="small">${describirAlarma(a, c)}${a.instruccion ? `<div class="muted" style="margin-top:2px">↳ ${esc(a.instruccion)}</div>` : ''}</td>
+        <td class="small">${describirAlarma(a, c)}${a.instruccion ? `<div class="muted" style="margin-top:2px">↳ ${esc(a.instruccion)}</div>` : ''}${a.snomed ? `<div class="muted" style="margin-top:2px">SNOMED CT ${esc(a.snomed.code)} · ${esc(a.snomed.display)}</div>` : ''}</td>
         <td style="white-space:nowrap">${editable ? `<button class="btn sm" data-alm-edit="${a.id}">Modificar</button> ${a.origen === 'generica' ? '<button class="btn sm" disabled title="Las genéricas no se pueden eliminar">Eliminar</button>' : `<button class="btn sm danger" data-alm-del="${a.id}">Eliminar</button>`}` : ''}</td>
       </tr>${alarmEdit && alarmEdit.id === a.id ? `<tr><td colspan="4">${alarmEditor(a, c)}</td></tr>` : ''}`;
     })
@@ -381,6 +382,7 @@ function alarmFormData(id, tipo) {
     return el ? el.value : undefined;
   };
   const d = { nombre: g('nombre'), instruccion: g('instruccion') };
+  if (g('motivo') !== undefined) d.motivo = g('motivo');
   if (tipo === 'texto') d.frases = g('frases');
   else Object.assign(d, { variable: g('variable'), operador: g('operador'), valor: g('valor'), sintomas: g('sintomas') });
   if (id === 'nuevo') d.tipo = tipo;
@@ -418,7 +420,7 @@ function renderPanel() {
       <div class="item">
         ${r.mediaUrl ? `<a href="${r.mediaUrl}" target="_blank"><img class="thumb" src="${r.mediaUrl}" alt="adjunto"></a>` : ''}
         <div class="body">
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sev ${r.prioridad}">${r.prioridad.toUpperCase()}</span><b>${esc(r.motivo)}</b></div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sev ${r.prioridad}">${r.prioridad.toUpperCase()}</span><b>${esc(r.motivo)}</b>${r.codigo ? `<span class="pill" title="Motivo codificado en SNOMED CT (se exporta en Communication.reasonCode)">SNOMED ${esc(r.codigo.code)} · ${esc(r.codigo.display)}</span>` : ''}</div>
           <div style="margin-top:4px">${esc(r.resumen)}</div>
           <div class="meta">${fDT(r.ts)} · ${r.estado === 'pendiente' ? 'pendiente' : `respondida: “${esc(r.respuesta)}”`}</div>
           ${r.estado === 'pendiente' ? `<div class="reply"><input data-draft="rep-${r.id}" placeholder="Responder a Marta…" list="quick-${r.id}"><datalist id="quick-${r.id}">${quick.map((q) => `<option value="${esc(q)}">`).join('')}</datalist><button class="btn sm primary" data-reply="${r.id}">Enviar</button></div>` : ''}

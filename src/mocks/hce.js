@@ -57,7 +57,7 @@ function everything() {
           status: 'active',
           intent: 'order',
           subject: { reference: `Patient/${PATIENT_ID}` },
-          medicationCodeableConcept: { coding: [{ system: 'http://snomed.info/sct', code: '109081006', display: 'Metformina' }], text: 'Metformina 850 mg comprimidos' },
+          medicationCodeableConcept: { coding: [{ system: 'http://snomed.info/sct', code: '372567009', display: 'Metformin' }], text: 'Metformina 850 mg comprimidos' },
           dosageInstruction: [{ text: '1 comprimido cada 12 horas, con desayuno y cena', timing: { repeat: { frequency: 2, period: 1, periodUnit: 'd' } } }],
         },
       },
@@ -85,8 +85,8 @@ function everything() {
           subject: { reference: `Patient/${PATIENT_ID}` },
           effectiveDateTime: '2026-09-15',
           component: [
-            { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Sistólica' }] }, valueQuantity: { value: 138, unit: 'mmHg' } },
-            { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastólica' }] }, valueQuantity: { value: 86, unit: 'mmHg' } },
+            { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Sistólica' }] }, valueQuantity: { value: 138, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
+            { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastólica' }] }, valueQuantity: { value: 86, unit: 'mmHg', system: 'http://unitsofmeasure.org', code: 'mm[Hg]' } },
           ],
         },
       },
@@ -104,7 +104,7 @@ function obs(id, loinc, display, value, unit, date) {
       code: { coding: [{ system: 'http://loinc.org', code: loinc, display }], text: display },
       subject: { reference: `Patient/${PATIENT_ID}` },
       effectiveDateTime: date,
-      valueQuantity: { value, unit },
+      valueQuantity: { value, unit, system: 'http://unitsofmeasure.org', code: unit },
     },
   };
 }
