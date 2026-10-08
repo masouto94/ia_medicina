@@ -208,4 +208,17 @@ async function handleFile({ path: filePath, mime, nombre, url, caption }) {
   S.save();
 }
 
-module.exports = { handleFile };
+// Envía como si fuera de la paciente un archivo de la carpeta muestras/
+const path = require('path');
+const MUESTRAS = path.join(__dirname, '..', 'muestras');
+async function enviarMuestra(archivo, caption = '') {
+  const name = path.basename(archivo);
+  const src = path.join(MUESTRAS, name);
+  if (!fs.existsSync(src)) throw new Error(`Muestra no encontrada: ${name}`);
+  const mime = name.endsWith('.pdf') ? 'application/pdf' : name.endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const dest = `${uid('f')}${path.extname(name)}`;
+  fs.copyFileSync(src, path.join(S.UPLOADS_DIR, dest));
+  await handleFile({ path: path.join(S.UPLOADS_DIR, dest), mime, nombre: name, url: `/uploads/${dest}`, caption });
+}
+
+module.exports = { handleFile, enviarMuestra, MUESTRAS };

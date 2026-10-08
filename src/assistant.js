@@ -408,6 +408,14 @@ function mockClassify(text, chunks, cfg) {
   if (ev.encontrado && ev.sugiere_cambio_tratamiento) {
     return { ...base, intencion: 'derivacion', tema: ev.tema.toLowerCase(), requiere_evidencia: true, respuesta: ev.resumen_para_paciente };
   }
+  // síntomas de urgencia que no dispararon una alarma (por ejemplo, porque la médica la pausó): derivación prioritaria
+  if (/pecho|falta el aire|falta de aire|respirar|me ahogo/.test(t)) {
+    const clave = /pecho/.test(t) ? 'sintoma_dolor_toracico' : 'sintoma_disnea';
+    return { ...base, intencion: 'derivacion', tema: 'síntoma de posible urgencia', registro: { tipo: 'sintoma', detalle: text }, derivar: { necesario: true, motivo: 'Síntoma de posible urgencia', motivo_clave: clave, resumen_para_medico: `Marta refiere: "${text}"`, prioridad: 'alta' }, respuesta: 'Esto lo tiene que ver la Dra. Lucía cuanto antes: ya le avisé con prioridad. Si empeora o no se te pasa, andá a la guardia o llamá al 107.' };
+  }
+  if (/dejar (la|el|de tomar)|suspender (la|el)|cambiar (la|el) (remedio|medicacion|pastilla)/.test(t)) {
+    return { ...base, intencion: 'derivacion', tema: 'pedido de cambio de tratamiento', derivar: { necesario: true, motivo: 'Pedido de cambio de tratamiento', motivo_clave: 'medicacion', resumen_para_medico: `Marta consulta: "${text}"`, prioridad: 'media' }, respuesta: 'Los cambios de medicación los decide la Dra. Lucía. No dejes de tomarla por tu cuenta: ya le pasé tu consulta y te va a responder por acá.' };
+  }
   if (/hormigueo|ardor|dolor|me duele|vision borrosa|herida|sangr|hinchad|fiebre/.test(t) && !(top && top.score > 4)) {
     return { ...base, intencion: 'derivacion', tema: 'síntoma nuevo', registro: { tipo: 'sintoma', detalle: text }, derivar: { necesario: true, motivo: 'Síntoma referido por la paciente', motivo_clave: /hormigueo|ardor/.test(t) ? 'sintoma_parestesia' : /fiebre/.test(t) ? 'sintoma_fiebre' : /herida/.test(t) ? 'herida' : /sangr/.test(t) ? 'sintoma_sangrado' : 'consulta', resumen_para_medico: `Marta refiere: "${text}"`, prioridad: 'media' }, respuesta: 'Gracias por contarme. Esto prefiero que lo vea la Dra. Lucía: ya le pasé tu consulta con un resumen y te va a responder por acá. Si empeora o aparece algo nuevo, consultá a la guardia.' };
   }
@@ -417,7 +425,8 @@ function mockClassify(text, chunks, cfg) {
   if (top && top.plan) {
     return { ...base, intencion: 'educativa', tema: 'indicación de la médica', fuentes_usadas: [top.id], respuesta: `La Dra. Lucía te indicó: ${top.texto}` };
   }
-  if (top) {
+  // simulado: sólo responde con la base si el fragmento coincide lo suficiente; si no, deriva (como haría el modelo)
+  if (top && top.score >= 3) {
     const omitida = top.id === 'DM2-02' || top.id === 'HTA-04';
     return { ...base, intencion: 'educativa', tema: top.tema, fuentes_usadas: [top.id], registro: omitida && /olvide|no tome/.test(t) ? { tipo: 'toma_omitida' } : { tipo: 'ninguno' }, respuesta: top.texto };
   }
@@ -433,6 +442,18 @@ function advanceToNextDose() {
   const st = S.get();
   const t = C.nextDoseTime(st.clock);
   return advanceTo(t, true);
+}
+
+// Adelanta el reloj simulado; si en el intervalo hay tomas, envía los recordatorios en orden
+function avanzar(minutos) {
+  const st = S.get();
+  const target = st.clock + minutos * 60e3;
+  let t = C.nextDoseTime(st.clock);
+  while (t && t <= target) {
+    advanceTo(t, true);
+    t = C.nextDoseTime(st.clock);
+  }
+  advanceTo(target, false);
 }
 
 function advanceTo(t, withReminder) {
@@ -568,6 +589,7 @@ module.exports = {
   planText,
   handleText,
   advanceToNextDose,
+  avanzar,
   advanceTo,
   answerReminder,
   bookSlot,

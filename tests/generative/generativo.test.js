@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { iniciar } = require('../lib/servidor');
 const { ejecutarPlan } = require('../lib/plan');
+const { metricas } = require('../../src/evaluacion');
 
 const { planes } = JSON.parse(fs.readFileSync(path.join(__dirname, 'casos.json'), 'utf8'));
 const REPETIR = Math.max(1, Number(process.env.GENERATIVE_REPEAT) || 1);
@@ -30,22 +31,13 @@ test('casos clínicos con el LLM real', async (t) => {
     }
   }
 
-  // Reporte: aciertos y matriz de alarmas (esperada vs obtenida)
-  const conAlarma = todos.filter((r) => 'alarma' in r.esperado);
-  const m = { vp: 0, fn: 0, fp: 0, vn: 0 };
-  for (const r of conAlarma) m[r.esperado.alarma ? (r.obtenido.alarma ? 'vp' : 'fn') : r.obtenido.alarma ? 'fp' : 'vn']++;
-  const reporte = {
-    fecha: new Date().toISOString(),
-    motor: estado.llm.model,
-    pasos: todos.length,
-    correctos: todos.filter((r) => r.ok).length,
-    alarmas: { ...m, sensibilidad: m.vp + m.fn ? +(m.vp / (m.vp + m.fn)).toFixed(2) : null, falsosPositivos: m.fp },
-    resultados: todos,
-  };
+  // Reporte con las mismas métricas que la simulación con plan de la app
+  const reporte = { fecha: new Date().toISOString(), motor: estado.llm.model, metricas: metricas(todos), resultados: todos };
   const dir = path.join(__dirname, '..', 'resultados');
   fs.mkdirSync(dir, { recursive: true });
   const archivo = path.join(dir, `generative-${reporte.fecha.replace(/[:.]/g, '-')}.json`);
   fs.writeFileSync(archivo, JSON.stringify(reporte, null, 2));
-  console.log(`\n  Correctos: ${reporte.correctos}/${reporte.pasos}  ·  alarmas: sensibilidad ${reporte.alarmas.sensibilidad ?? '—'}, falsos positivos ${m.fp}, falsos negativos ${m.fn}`);
+  const m = reporte.metricas;
+  console.log(`\n  Correctos: ${m.correctos}/${m.evaluados}  ·  alarmas: sensibilidad ${m.alarmas.sensibilidad ?? '—'}, falsos positivos ${m.alarmas.fp}, falsos negativos ${m.alarmas.fn}  ·  derivaciones correctas ${m.derivaciones.correctas}/${m.derivaciones.evaluadas}  ·  fuera de alcance bien manejadas ${m.fueraDeAlcance.correctas}/${m.fueraDeAlcance.preguntas}`);
   console.log(`  Reporte: ${path.relative(process.cwd(), archivo)}\n`);
 });

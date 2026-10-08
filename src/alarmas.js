@@ -67,6 +67,8 @@ function describir(a, cfg) {
 
 // ---------------- Coincidencia de frases (con negación simple) ----------------
 const NEGACION = /(?:^|\s)(no tengo|no tuve|no hay|sin|nada de|tampoco|ni)\s+(\S+\s+){0,2}$/;
+// "no me duele el pecho": sólo si el "no me" va pegado a la frase ("no me pasa el dolor de pecho" sigue siendo alarma)
+const NEGACION_INMEDIATA = /(?:^|\s)no me\s+$/;
 
 function contiene(t, frase) {
   const f = normalize(frase);
@@ -75,7 +77,7 @@ function contiene(t, frase) {
   while (i >= 0) {
     const antes = t.slice(Math.max(0, i - 28), i);
     // "no puedo respirar" lleva su propia negación: sólo se descarta si la negación precede a la frase
-    if (!NEGACION.test(antes)) return true;
+    if (!NEGACION.test(antes) && !NEGACION_INMEDIATA.test(antes)) return true;
     i = t.indexOf(f, i + 1);
   }
   return false;

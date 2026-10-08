@@ -83,6 +83,7 @@ function render() {
   renderFhir();
   renderTraces();
   renderAlarmas();
+  renderSim();
   renderChat();
 }
 
@@ -105,7 +106,11 @@ function renderHeader() {
   const has = !!S.assistant;
   $('#btnNext').disabled = !has;
   $('#btnHour').disabled = !has;
-  $('#btnSeed').disabled = !has || S.seeded;
+  const simCorriendo = !!(S.simulacion && S.simulacion.estado === 'corriendo');
+  $('#btnSeed').disabled = !has || S.seeded || simCorriendo;
+  $('#btnPlan').disabled = simCorriendo;
+  if (simCorriendo) $('#btnNext').disabled = $('#btnHour').disabled = true;
+  $('#btnReset').disabled = simCorriendo;
   const n = S.metrics ? S.metrics.alertasAbiertas + S.metrics.derivacionesPendientes : 0;
   $('#tabBadge').innerHTML = n ? `<span class="count">${n}</span>` : '';
 }
@@ -648,7 +653,9 @@ let lastMsgCount = 0;
 
 function renderChat() {
   const has = !!S.assistant;
-  $('#phoneOverlay').style.display = has ? 'none' : 'grid';
+  const simCorr = !!(S.simulacion && S.simulacion.estado === 'corriendo');
+  $('#phoneOverlay').style.display = has && !simCorr ? 'none' : 'grid';
+  $('#phoneOverlay').textContent = simCorr ? `Simulación con plan en curso (${S.simulacion.hechos}/${S.simulacion.total} pasos)… los mensajes aparecen en el panel Simulación.` : 'Esperando que la Dra. Lucía configure el asistente…';
   const canal = has ? S.assistant.config.canal : 'whatsapp';
   $('#waHead').className = `wa-head ${canal === 'app' ? 'app' : ''}`;
   $('#waStatus').textContent = S.busy ? 'escribiendo…' : canal === 'app' ? 'App del asistente (simulada)' : 'WhatsApp Business (simulado)';
@@ -856,6 +863,158 @@ function updateSendIcon() {
   $('#icoSend').style.display = has ? '' : 'none';
 }
 
+
+// ================= Simulación con plan JSON =================
+let PLANES = [];
+let planSel = null; // { nombre, contenido }
+let simVisto = null;
+const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
+
+function kv(o) {
+  return Object.entries(o || {})
+    .map(([k, v]) => `<div class="kv"><b>${esc(k)}:</b> ${esc(Array.isArray(v) ? v.join(', ') || '—' : v === null ? '—' : String(v))}</div>`)
+    .join('') || '<span class="small muted">sin expectativa (no se evalúa)</span>';
+}
+function obtenidoCompacto(o, esp) {
+  const base = { intencion: o.intencion, alarma: o.alarma, origenAlarma: o.origenAlarma, derivacion: o.derivacion, codigoDerivacion: o.codigosDerivacion, registro: o.registro, fuente: o.fuentes, evidencia: o.evidencia, sugerencia: o.sugerencia };
+  // primero lo que se esperaba, después el resto con valor
+  const claves = Object.keys(base).filter((k) => k in esp || (base[k] != null && base[k] !== false && !(Array.isArray(base[k]) && !base[k].length)));
+  const out = {};
+  for (const k of claves) out[k] = base[k];
+  if ('fueraDeAlcance' in esp) out.fueraDeAlcance = o.derivacion ? 'derivada' : o.intencion === 'educativa' || (o.fuentes || []).length || o.evidencia ? 'respondida' : 'declinada';
+  if (o.sinRespaldo) out.sinRespaldo = 'respuesta educativa sin fuente citada';
+  return kv(out);
+}
+
+function renderSim() {
+  const j = S.simulacion;
+  const corriendo = j && j.estado === 'corriendo';
+  $('#simBadge').innerHTML = corriendo ? `<span class="count">${j.hechos}/${j.total}</span>` : '';
+  if (!j) {
+    setHTML('tab-sim', `<div class="stack">
+      <div class="callout">Ejecutá un plan JSON con pasos de la paciente (mensajes o archivos de prueba, con su momento) y el resultado esperado de cada uno. Al terminar, el reporte compara lo obtenido con lo esperado: sensibilidad de alarmas, falsos positivos, preguntas fuera de alcance y derivaciones correctas.</div>
+      <div><button class="btn primary" id="btnPlan2">Ejecutar un plan JSON…</button></div></div>`);
+    return;
+  }
+  if (j.id !== simVisto && j.estado !== 'corriendo') {
+    simVisto = j.id;
+    if (currentTab === 'sim') toast(j.estado === 'terminada' ? 'Simulación terminada' : j.estado === 'cancelada' ? 'Simulación cancelada' : `Error en la simulación: ${j.error}`, j.estado === 'error');
+  }
+  const m = j.metricas || { pasos: 0, evaluados: 0, correctos: 0, alarmas: {}, derivaciones: {}, fueraDeAlcance: {}, intencion: {} };
+  const a = m.alarmas || {};
+  const d = m.derivaciones || {};
+  const fa = m.fueraDeAlcance || {};
+  const tono = (x, bien = 1) => (x == null ? '' : x >= bien ? 'good' : x >= 0.8 ? 'warn' : 'bad');
+  const estadoTxt = { corriendo: '⏳ En curso', terminada: '✓ Terminada', cancelada: '⏹ Cancelada', error: '⚠ Error' }[j.estado];
+  const dur = ((j.fin || Date.now()) - j.inicio) / 1000;
+  let filas = '';
+  let planAnt = null;
+  for (const r of j.resultados) {
+    if (r.plan !== planAnt) {
+      filas += `<tr class="plan-row"><td colspan="5">${esc(r.plan)}</td></tr>`;
+      planAnt = r.plan;
+    }
+    filas += `<tr>
+      <td class="res ${r.evaluado ? (r.ok ? 'ok' : 'bad') : ''}">${r.evaluado ? (r.ok ? '✓' : '✗') : '·'}</td>
+      <td><b class="small">${esc(r.paso)}</b><div class="small">${esc(r.entrada)}</div></td>
+      <td>${kv(r.esperado)}</td>
+      <td>${obtenidoCompacto(r.obtenido, r.esperado)}${r.fallas.map((f) => `<div class="falla">✗ ${esc(f)}</div>`).join('')}</td>
+      <td><details><summary>Respuesta</summary><div>${esc(r.obtenido.respuesta || '(sin respuesta)')}</div></details></td>
+    </tr>`;
+  }
+  setHTML('tab-sim', `<div class="stack">
+    <div class="sim-head">
+      <div>
+        <div style="font-weight:650">${esc(j.nombre)} <span class="pill">${estadoTxt}</span></div>
+        <div class="small muted">${j.planes.length} plan(es) · ${j.hechos}/${j.total} pasos · motor: ${esc(j.motor)} · ${dur.toFixed(0)} s</div>
+        ${j.error ? `<div class="small val-err">${esc(j.error)}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${corriendo ? '<button class="btn danger sm" id="btnPlanCancel">Cancelar</button>' : '<button class="btn sm" id="btnPlan3">Ejecutar otro plan…</button>'}
+        <a class="btn sm" href="/api/sim/plan?download=1" download>Descargar reporte JSON</a>
+      </div>
+    </div>
+    <div class="progress"><div style="width:${j.total ? (100 * j.hechos) / j.total : 0}%"></div></div>
+    <div class="kpis">
+      <div class="kpi ${tono(m.tasaAcierto)}"><div class="label">Pasos correctos</div><div class="value">${m.correctos}/${m.evaluados}</div><div class="sub">acierto ${pct(m.tasaAcierto)}</div></div>
+      <div class="kpi ${tono(a.sensibilidad)}"><div class="label">Sensibilidad de alarmas</div><div class="value">${pct(a.sensibilidad)}</div><div class="sub">${a.vp || 0} detectadas de ${(a.vp || 0) + (a.fn || 0)} esperadas</div></div>
+      <div class="kpi ${a.evaluadas ? (a.fp ? 'bad' : 'good') : ''}"><div class="label">Falsos positivos</div><div class="value">${a.evaluadas ? a.fp : '—'}</div><div class="sub">especificidad ${pct(a.especificidad)}</div></div>
+      <div class="kpi ${fa.preguntas ? (fa.respondidas ? 'bad' : 'good') : ''}" title="Correcta: derivada a la médica o declinada sin dar contenido. Error: respondida con contenido sin derivar."><div class="label">Fuera de alcance</div><div class="value">${fa.preguntas ? `${fa.correctas}/${fa.preguntas}` : '—'}</div><div class="sub">${fa.derivadas || 0} derivadas · ${fa.declinadas || 0} declinadas · ${fa.respondidas || 0} respondidas${fa.respuestasSinRespaldo ? ` · ${fa.respuestasSinRespaldo} educativas sin fuente` : ''}</div></div>
+      <div class="kpi ${tono(d.tasa)}"><div class="label">Derivaciones correctas</div><div class="value">${d.evaluadas ? `${d.correctas}/${d.evaluadas}` : '—'}</div><div class="sub">${pct(d.tasa)}</div></div>
+    </div>
+    <div class="section" style="overflow-x:auto">
+      <h3>Obtenido vs. esperado <span class="hint">✓ coincide · ✗ no coincide · · sin expectativa</span></h3>
+      ${j.resultados.length ? `<table class="t simtbl"><tr><th></th><th>Paso</th><th>Esperado</th><th>Obtenido</th><th></th></tr>${filas}</table>` : '<div class="empty">Esperando el primer paso…</div>'}
+    </div>
+  </div>`);
+}
+
+async function abrirPlanModal() {
+  $('#simMenu').classList.remove('open');
+  $('#planModal').classList.add('open');
+  try {
+    PLANES = await api('/api/sim/planes');
+  } catch {
+    PLANES = [];
+  }
+  $('#planEjemplos').innerHTML = PLANES.length
+    ? PLANES.map((p, i) => `<button class="plan-ej" data-plan-ej="${i}"><b>${esc(p.nombre)}</b><small>${esc(p.descripcion)}</small><small>${p.planes} plan(es) · ${p.pasos} pasos · ${esc(p.archivo)}</small></button>`).join('')
+    : '<div class="small muted">No hay planes en muestras/planes.</div>';
+  validarPlanTxt();
+}
+function cerrarPlanModal() {
+  $('#planModal').classList.remove('open');
+}
+function usarPlan(nombre, contenido) {
+  planSel = { nombre };
+  $('#planTxt').value = typeof contenido === 'string' ? contenido : JSON.stringify(contenido, null, 2);
+  $('#planNombre').textContent = nombre;
+  validarPlanTxt();
+}
+let valTimer = null;
+function validarPlanTxt() {
+  clearTimeout(valTimer);
+  valTimer = setTimeout(async () => {
+    const out = $('#planVal');
+    const txt = $('#planTxt').value.trim();
+    $('#planRun').disabled = true;
+    if (!txt) return (out.innerHTML = '<span class="muted">Elegí un plan de ejemplo, cargá un archivo o pegá el JSON.</span>');
+    let json;
+    try {
+      json = JSON.parse(txt);
+    } catch (e) {
+      return (out.innerHTML = `<span class="val-err">JSON inválido: ${esc(e.message)}</span>`);
+    }
+    try {
+      const r = await api('/api/sim/plan/validate', { body: { plan: json } });
+      out.innerHTML = `<span class="val-ok">✓ Plan válido: ${r.planes} plan(es), ${r.pasos} pasos.</span> <span class="muted">La ejecución reinicia la demo.</span>`;
+      $('#planRun').disabled = false;
+    } catch (e) {
+      out.innerHTML = `<span class="val-err">${esc(e.message)}</span>`;
+    }
+  }, 250);
+}
+async function ejecutarPlan() {
+  let json;
+  try {
+    json = JSON.parse($('#planTxt').value);
+  } catch {
+    return toast('JSON inválido', true);
+  }
+  const nombre = json.nombre || (planSel && planSel.nombre) || 'plan';
+  try {
+    await api('/api/sim/plan', { body: { plan: json, nombre } });
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  cerrarPlanModal();
+  configDraft = null;
+  Object.keys(rendered).forEach((k) => delete rendered[k]);
+  switchTab('sim');
+  toast('Simulación iniciada');
+  await refresh();
+}
+
 // ---------------- Eventos ----------------
 function switchTab(t) {
   if (!t) return;
@@ -882,12 +1041,24 @@ document.addEventListener('click', async (e) => {
     configDraft = null;
     rendered.configSig = null;
     renderConfig();
-    if (isNew) toast('Asistente generado. Marta ya puede escribir; probá “Simular 14 días” o “Próxima toma”.');
+    if (isNew) toast('Asistente generado. Marta ya puede escribir; probá “Simular” (14 días de ejemplo o un plan JSON) o “Próxima toma”.');
     return;
+  }
+  if (t.id === 'btnSim') return $('#simMenu').classList.toggle('open');
+  if (t.id === 'btnPlan' || t.id === 'btnPlan2' || t.id === 'btnPlan3') return abrirPlanModal();
+  if (t.id === 'planClose' || t.id === 'planCancel') return cerrarPlanModal();
+  if (t.id === 'planFileBtn') return $('#planFile').click();
+  if (t.id === 'planRun') return ejecutarPlan();
+  if (t.id === 'btnPlanCancel') return act('/api/sim/plan/cancel', {}, 'Cancelando después del paso en curso…');
+  if (t.dataset.planEj != null) {
+    const p = PLANES[Number(t.dataset.planEj)];
+    $$('.plan-ej').forEach((b) => b.classList.toggle('sel', b === t));
+    return usarPlan(p.archivo, p.contenido);
   }
   if (t.id === 'btnNext') return act('/api/sim/next-dose');
   if (t.id === 'btnHour') return act('/api/sim/advance', { minutes: 60 });
   if (t.id === 'btnSeed') {
+    $('#simMenu').classList.remove('open');
     await act('/api/sim/seed', {}, 'Se generaron 14 días de seguimiento de ejemplo');
     switchTab('panel');
     return;
@@ -993,12 +1164,20 @@ document.addEventListener('change', (e) => {
     renderAlarmas();
   }
   if (e.target.id === 'fileInput') chooseFile(e.target.files[0]);
+  if (e.target.id === 'planFile' && e.target.files[0]) {
+    const f = e.target.files[0];
+    f.text().then((txt) => usarPlan(f.name, txt));
+    $$('.plan-ej').forEach((b) => b.classList.remove('sel'));
+    e.target.value = '';
+  }
 });
 document.addEventListener('input', (e) => {
   if (e.target.closest('#cfgForm')) readForm();
   if (e.target.id === 'txt') updateSendIcon();
+  if (e.target.id === 'planTxt') validarPlanTxt();
 });
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') cerrarPlanModal();
   if (e.key !== 'Enter') return;
   if (e.target.id === 'txt') sendText(e.target.value);
   if (e.target.id === 'caption') sendFile();
@@ -1011,6 +1190,8 @@ document.addEventListener('click', (e) => {
     setTimeout(refresh, 300);
   }
   if (!e.target.closest('#attachMenu') && !e.target.closest('#btnAttach')) $('#attachMenu').classList.remove('open');
+  if (!e.target.closest('.simwrap')) $('#simMenu').classList.remove('open');
+  if (e.target.id === 'planModal') cerrarPlanModal();
 });
 
 // ---------------- Inicio ----------------
@@ -1022,5 +1203,11 @@ document.addEventListener('click', (e) => {
   } catch {}
   renderAttachMenu();
   await refresh();
-  setInterval(refresh, 2500);
+  // mientras corre una simulación con plan, se refresca más seguido
+  (function ciclo() {
+    setTimeout(async () => {
+      await refresh();
+      ciclo();
+    }, S && S.simulacion && S.simulacion.estado === 'corriendo' ? 1000 : 2500);
+  })();
 })();

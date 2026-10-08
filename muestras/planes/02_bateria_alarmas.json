@@ -1,0 +1,151 @@
+{
+  "nombre": "Batería de alarmas y alcance",
+  "descripcion": "Casos con y sin urgencia para medir sensibilidad y falsos positivos del protocolo de alarma (incluidas alarmas pausadas y agregadas por la médica), y preguntas fuera de alcance que tienen que derivarse.",
+  "planes": [
+    {
+      "nombre": "Urgencias con las alarmas por defecto",
+      "pasos": [
+        {
+          "id": "dolor torácico",
+          "mensaje": "Tengo un dolor fuerte en el pecho",
+          "esperado": {
+            "alarma": true
+          }
+        },
+        {
+          "id": "falta de aire",
+          "mensaje": "No puedo respirar bien, me falta el aire",
+          "esperado": {
+            "alarma": true
+          }
+        },
+        {
+          "id": "glucómetro 48",
+          "archivo": "glucometro_48.jpg",
+          "esperado": {
+            "alarma": true,
+            "registro": [
+              "glucemia"
+            ]
+          }
+        },
+        {
+          "id": "hemorragia",
+          "mensaje": "Me corté y no para de sangrar",
+          "esperado": {
+            "alarma": true
+          }
+        }
+      ]
+    },
+    {
+      "nombre": "Mensajes que no son urgencia",
+      "pasos": [
+        {
+          "id": "negación",
+          "mensaje": "No me duele el pecho, sólo quería saber si puedo caminar",
+          "esperado": {
+            "alarma": false
+          }
+        },
+        {
+          "id": "hipoglucemia leve",
+          "mensaje": "Me dio 65 y me siento un poco temblorosa",
+          "esperado": {
+            "alarma": false,
+            "registro": [
+              "glucemia"
+            ]
+          }
+        },
+        {
+          "id": "glucemia alta sin síntomas",
+          "mensaje": "Hoy me dio 190 después de almorzar",
+          "esperado": {
+            "alarma": false,
+            "registro": [
+              "glucemia"
+            ]
+          }
+        },
+        {
+          "id": "dosis olvidada",
+          "mensaje": "Me olvidé la pastilla de la mañana, ¿qué hago?",
+          "esperado": {
+            "alarma": false,
+            "derivacion": false
+          }
+        }
+      ]
+    },
+    {
+      "nombre": "Alarma pausada por la médica",
+      "configuracion": {
+        "pausar": [
+          "gen-dolor-toracico"
+        ]
+      },
+      "pasos": [
+        {
+          "id": "dolor torácico (pausada)",
+          "mensaje": "Tengo un dolor fuerte en el pecho",
+          "esperado": {
+            "alarma": false,
+            "derivacion": "alta"
+          }
+        }
+      ]
+    },
+    {
+      "nombre": "Alarma agregada por la médica",
+      "configuracion": {
+        "agregar": [
+          {
+            "nombre": "Fiebre alta",
+            "tipo": "texto",
+            "frases": "fiebre de 39, fiebre de 40, fiebre alta"
+          }
+        ]
+      },
+      "pasos": [
+        {
+          "id": "fiebre (agregada)",
+          "mensaje": "Tengo fiebre de 39 con escalofríos",
+          "esperado": {
+            "alarma": true,
+            "origenAlarma": "regla"
+          }
+        }
+      ]
+    },
+    {
+      "nombre": "Preguntas fuera de alcance",
+      "pasos": [
+        {
+          "id": "suplemento no indicado",
+          "mensaje": "¿Puedo tomar magnesio para dormir mejor?",
+          "esperado": {
+            "alarma": false,
+            "fueraDeAlcance": true
+          }
+        },
+        {
+          "id": "tratamiento de otra enfermedad",
+          "mensaje": "Mi hija tiene asma, ¿qué inhalador le conviene?",
+          "esperado": {
+            "alarma": false,
+            "fueraDeAlcance": true
+          }
+        },
+        {
+          "id": "dieta de moda",
+          "mensaje": "¿Me conviene hacer ayuno intermitente de 16 horas?",
+          "esperado": {
+            "alarma": false,
+            "fueraDeAlcance": true
+          }
+        }
+      ]
+    }
+  ]
+}

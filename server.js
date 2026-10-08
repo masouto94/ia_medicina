@@ -12,6 +12,8 @@ const V = require('./src/vision');
 const F = require('./src/fhir');
 const llm = require('./src/llm');
 const ALM = require('./src/alarmas');
+const CFG = require('./src/configuracion');
+const SIM = require('./src/simulacion');
 const hce = require('./src/mocks/hce');
 const OE = require('./src/mocks/openevidence');
 const { seed14 } = require('./src/seed');
@@ -48,6 +50,12 @@ const wrap = (fn) => async (req, res) => {
     busy--;
   }
 };
+// Mientras corre una simulación con plan, la API no acepta cambios (sólo leer el estado o cancelar)
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' || !SIM.corriendo() || req.path === '/sim/plan/cancel') return next();
+  res.status(409).json({ error: 'Hay una simulación con plan en curso. Esperá a que termine o cancelala.' });
+});
+
 const needAssistant = () => {
   if (!S.get().assistant) throw new Error('Primero la médica debe configurar el asistente.');
 };
@@ -58,7 +66,8 @@ app.get('/api/state', (req, res) => {
   if (st.assistant) ALM.ensure(st.assistant.config); // migra configuraciones guardadas antes de las alarmas configurables
   res.json({
     ...st,
-    busy: busy > 0,
+    busy: busy > 0 || SIM.corriendo(),
+    simulacion: SIM.estado(),
     clockText: fmtDateTime(st.clock),
     metrics: st.assistant ? C.metrics(14) : null,
     nextDose: st.assistant ? C.pendingDosesText() : null,
@@ -87,27 +96,36 @@ app.post('/api/sim/seed', wrap(() => {
 app.post('/api/sim/next-dose', wrap(() => { needAssistant(); A.advanceToNextDose(); }));
 app.post('/api/sim/advance', wrap((req) => {
   needAssistant();
-  const min = Math.max(1, Math.min(24 * 60, Number(req.body.minutes) || 60));
-  const st = S.get();
-  const target = st.clock + min * 60e3;
-  // si hay tomas en el intervalo, se envían los recordatorios en orden
-  let t = C.nextDoseTime(st.clock);
-  while (t && t <= target) {
-    A.advanceTo(t, true);
-    t = C.nextDoseTime(st.clock);
-  }
-  A.advanceTo(target, false);
+  A.avanzar(Math.max(1, Math.min(24 * 60, Number(req.body.minutes) || 60)));
 }));
 
-// ---------- HCE (mock FHIR) ----------
-app.post('/api/hce/import', wrap(() => {
-  const b = hce.everything();
-  const st = S.get();
-  st.hce = hce.toSummary(b);
-  S.trace('Importación desde la HCE', [{ paso: 'HCE (mock FHIR)', detalle: `GET /Patient/${hce.PATIENT_ID}/$everything → ${b.entry.length} recursos` }]);
-  S.save();
-  return { summary: st.hce, bundle: b };
+// Simulación a demanda con un plan JSON (ver muestras/planes/)
+const PLANES_DIR = path.join(__dirname, 'muestras', 'planes');
+app.get('/api/sim/planes', (req, res) => {
+  const archivos = fs.existsSync(PLANES_DIR) ? fs.readdirSync(PLANES_DIR).filter((f) => f.endsWith('.json')).sort() : [];
+  res.json(
+    archivos.map((archivo) => {
+      const contenido = JSON.parse(fs.readFileSync(path.join(PLANES_DIR, archivo), 'utf8'));
+      const planes = Array.isArray(contenido.planes) ? contenido.planes : [contenido];
+      return { archivo, nombre: contenido.nombre || archivo, descripcion: contenido.descripcion || '', planes: planes.length, pasos: planes.reduce((n, p) => n + (p.pasos || []).length, 0), contenido };
+    }),
+  );
+});
+app.post('/api/sim/plan/validate', wrap((req) => {
+  const planes = SIM.validarPlanes(req.body.plan);
+  return { ok: true, planes: planes.length, pasos: planes.reduce((n, p) => n + p.pasos.length, 0) };
 }));
+app.post('/api/sim/plan', wrap((req) => SIM.iniciar(req.body.plan, String(req.body.nombre || 'plan').slice(0, 120))));
+app.post('/api/sim/plan/cancel', wrap(() => SIM.cancelar()));
+app.get('/api/sim/plan', (req, res) => {
+  const e = SIM.estado();
+  if (!e) return res.status(404).json({ error: 'Todavía no se ejecutó ningún plan' });
+  if (req.query.download) res.setHeader('Content-Disposition', `attachment; filename="reporte-${e.id}.json"`);
+  res.json(e);
+});
+
+// ---------- HCE (mock FHIR) ----------
+app.post('/api/hce/import', wrap(() => CFG.importarHCE()));
 app.get('/api/hce/bundle', (req, res) => res.json(hce.everything()));
 app.get('/api/assistant/default', wrap(() => {
   const st = S.get();
@@ -115,72 +133,12 @@ app.get('/api/assistant/default', wrap(() => {
   return A.defaultConfig(st.hce);
 }));
 
-app.post('/api/assistant', wrap((req) => {
-  const st = S.get();
-  if (!st.hce) throw new Error('Importá primero los datos desde la HCE.');
-  const cfg = req.body.config;
-  if (!cfg || !cfg.medicacion || !cfg.medicacion.length) throw new Error('Configuración inválida');
-  const nuevo = !st.assistant;
-  const prev = nuevo ? null : st.assistant.config;
-  // las alarmas se editan con sus propios endpoints (cada cambio queda registrado): el formulario no las pisa
-  if (prev) {
-    cfg.alarmas = prev.alarmas;
-    cfg.alarmasEliminadas = prev.alarmasEliminadas;
-  }
-  ALM.ensure(cfg);
-  st.assistant = { config: cfg, creado: nuevo ? st.clock : st.assistant.creado, actualizado: Date.now(), version: nuevo ? 1 : (st.assistant.version || 1) + 1 };
-  // Si la médica cambia indicaciones u horarios, se le avisa a la paciente
-  if (prev) {
-    const avisos = [];
-    if ((prev.indicaciones || '') !== (cfg.indicaciones || '')) avisos.push(`📋 Nuevas indicaciones:\n${cfg.indicaciones || '(sin indicaciones adicionales)'}`);
-    const hs = (c) => c.medicacion.map((m) => `${m.nombre} a las ${m.horarios.join(' y ')}`).join('; ');
-    if (hs(prev) !== hs(cfg)) avisos.push(`⏰ Nuevos horarios de medicación: ${hs(cfg)}`);
-    if (avisos.length) C.addMessage({ from: 'asistente', kind: 'text', intent: 'otro', text: `Marta, la Dra. Lucía actualizó tu plan de cuidado.\n${avisos.join('\n')}` });
-  }
-  if (nuevo) {
-    C.addMessage({
-      from: 'asistente',
-      kind: 'text',
-      intent: 'otro',
-      text: `¡Hola, Marta! 👋 Soy tu asistente de seguimiento, configurado por la Dra. Lucía.\nTe voy a recordar tus remedios (${cfg.medicacion.map((m) => `${m.nombre} a las ${m.horarios.join(' y ')}`).join('; ')}), responder dudas sobre tu tratamiento, registrar tus valores y ayudarte con los turnos.\nPodés escribirme, mandarme audios o fotos del glucómetro, tensiómetro, remedios o análisis.\nNo reemplazo a tu médica: si algo lo tiene que ver ella, se lo paso. Ante una urgencia, llamá al 107.`,
-    });
-  }
-  S.trace(nuevo ? 'Asistente generado' : 'Configuración actualizada', [
-    { paso: 'Panel médico', detalle: `${cfg.id}: módulos ${cfg.modulos.join('+')}, ${cfg.temas.length} temas, nivel ${cfg.nivelLenguaje}, canal ${cfg.canal}` },
-    { paso: 'Instancia del LLM', detalle: 'Sin reentrenamiento: modelo general parametrizado por el plan de cuidado (prompt de sistema + RAG)' },
-  ]);
-  S.save();
-}));
+app.post('/api/assistant', wrap((req) => { CFG.guardarAsistente(req.body.config); }));
 
 // ---------- Alarmas (protocolo de urgencia) ----------
-function alarmChanged(accion, detalle) {
-  const st = S.get();
-  st.assistant.actualizado = Date.now();
-  st.assistant.version = (st.assistant.version || 1) + 1;
-  S.trace(`Alarma ${accion}`, [{ paso: 'Panel médico – alarmas', detalle }]);
-  S.save();
-  return { alarmas: st.assistant.config.alarmas, umbrales: st.assistant.config.umbrales, actualizado: st.assistant.actualizado, version: st.assistant.version };
-}
-app.post('/api/alarms', wrap((req) => {
-  needAssistant();
-  const cfg = S.get().assistant.config;
-  const a = ALM.crear(req.body || {});
-  cfg.alarmas.push(a);
-  return alarmChanged('agregada', `${a.nombre} [${a.id}]: ${ALM.describir(a, cfg)}`);
-}));
-app.put('/api/alarms/:id', wrap((req) => {
-  needAssistant();
-  const cfg = S.get().assistant.config;
-  const { antes, despues } = ALM.modificar(cfg, req.params.id, req.body || {});
-  const accion = 'activa' in (req.body || {}) && Object.keys(req.body).length === 1 ? (despues.activa ? 'reactivada' : 'pausada') : 'modificada';
-  return alarmChanged(accion, `${despues.nombre} [${despues.id}]${accion === 'modificada' ? `: ${ALM.describir(despues, cfg)}` : ''}`);
-}));
-app.delete('/api/alarms/:id', wrap((req) => {
-  needAssistant();
-  const cfg = S.get().assistant.config;
-  const a = ALM.eliminar(cfg, req.params.id);
-  return alarmChanged('eliminada', `${a.nombre} [${a.id}]`);
-}));
+app.post('/api/alarms', wrap((req) => CFG.agregarAlarma(req.body)));
+app.put('/api/alarms/:id', wrap((req) => CFG.modificarAlarma(req.params.id, req.body)));
+app.delete('/api/alarms/:id', wrap((req) => CFG.eliminarAlarma(req.params.id)));
 
 // ---------- Chat de la paciente ----------
 app.post('/api/chat/text', wrap(async (req) => {
@@ -217,13 +175,7 @@ app.get('/api/muestras', (req, res) => {
 
 app.post('/api/chat/sample', wrap(async (req) => {
   needAssistant();
-  const name = path.basename(String(req.body.archivo || ''));
-  const src = path.join(__dirname, 'muestras', name);
-  if (!fs.existsSync(src)) throw new Error('Muestra no encontrada');
-  const mime = name.endsWith('.pdf') ? 'application/pdf' : name.endsWith('.png') ? 'image/png' : 'image/jpeg';
-  const dest = `${uid('f')}${path.extname(name)}`;
-  fs.copyFileSync(src, path.join(S.UPLOADS_DIR, dest));
-  await V.handleFile({ path: path.join(S.UPLOADS_DIR, dest), mime, nombre: name, url: `/uploads/${dest}`, caption: String(req.body.caption || '').trim() });
+  await V.enviarMuestra(String(req.body.archivo || ''), String(req.body.caption || '').trim());
 }));
 
 app.post('/api/reminder/:id', wrap((req) => { A.answerReminder(req.params.id, !!req.body.tomada); }));

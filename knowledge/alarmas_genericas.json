@@ -1,6 +1,6 @@
 {
   "descripcion": "Señales de alarma genéricas, comunes a cualquier paciente. Se pueden pausar y modificar desde el panel de la médica, pero no eliminar. Las frases se comparan sin tildes ni mayúsculas; una frase puede ser el comienzo de una palabra (p. ej. 'desmay' cubre 'desmayé').",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "alarmas": [
     {
       "id": "gen-dolor-toracico",
@@ -15,7 +15,10 @@
         "dolor toracico",
         "opresion en el pecho",
         "presion en el pecho",
-        "me aprieta el pecho"
+        "me aprieta el pecho",
+        "duele mucho el pecho",
+        "dolor fuerte en el pecho",
+        "dolor muy fuerte en el pecho"
       ],
       "snomed": {
         "code": "29857009",

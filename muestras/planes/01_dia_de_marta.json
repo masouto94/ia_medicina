@@ -1,0 +1,42 @@
+{
+  "nombre": "Un día de Marta",
+  "descripcion": "Un día completo con el reloj simulado: medición en ayunas, dudas, una pregunta fuera de alcance, un registro de presión y un dolor torácico a la noche.",
+  "pasos": [
+    {
+      "id": "07:30 glucemia en ayunas",
+      "archivo": "glucometro_182.jpg",
+      "comentario": "en ayunas",
+      "esperado": { "alarma": false, "registro": ["glucemia"] }
+    },
+    {
+      "id": "08:00 duda de alimentación",
+      "momento": "+30m",
+      "mensaje": "¿Puedo comer frutas en el desayuno?",
+      "esperado": { "alarma": false, "intencion": "educativa", "derivacion": false, "fuente": "DM2-08" }
+    },
+    {
+      "id": "10:00 pregunta fuera de alcance",
+      "momento": "+2h",
+      "mensaje": "Me duele la rodilla desde ayer, ¿qué antiinflamatorio me conviene tomar?",
+      "esperado": { "alarma": false, "fueraDeAlcance": true, "evidencia": false }
+    },
+    {
+      "id": "13:00 pedido de cambio de tratamiento",
+      "momento": "+3h",
+      "mensaje": "¿Puedo dejar la metformina? Me cae mal al estómago",
+      "esperado": { "alarma": false, "derivacion": true, "codigoDerivacion": "182836005" }
+    },
+    {
+      "id": "18:00 presión",
+      "momento": "+5h",
+      "mensaje": "Me tomé la presión y me dio 150/95",
+      "esperado": { "alarma": false, "intencion": "registro", "registro": ["presion"] }
+    },
+    {
+      "id": "22:00 dolor torácico",
+      "momento": "+4h",
+      "mensaje": "Me duele mucho el pecho y me corre al brazo izquierdo",
+      "esperado": { "alarma": true, "origenAlarma": "regla", "codigoDerivacion": "29857009" }
+    }
+  ]
+}

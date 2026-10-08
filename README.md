@@ -103,10 +103,36 @@ La barra superior permite manejar el tiempo de la simulación:
 - **Reloj simulado:** la fecha y hora de la simulación.
 - **⏭ Próxima toma:** adelanta el reloj hasta el próximo horario de medicación y envía el recordatorio.
 - **+1 h:** adelanta una hora.
-- **Simular 14 días:** genera dos semanas de seguimiento de ejemplo para ver el panel completo. Conviene usarlo justo después de generar el asistente.
+- **Simular ▾:** abre dos opciones:
+  - **Escenario fijo: 14 días de ejemplo.** Genera dos semanas de seguimiento para ver el panel completo. Conviene usarlo justo después de generar el asistente.
+  - **Ejecutar un plan JSON…** Corre una secuencia de mensajes o archivos de la paciente y compara lo que hizo el asistente con lo esperado (ver más abajo).
 - **Reiniciar:** borra todo y vuelve al inicio.
 
 Arriba, junto al título, se ve qué motor de IA está activo ("Motor IA: Claude Code · sonnet" o "Modo simulado").
+
+### Simular con un plan JSON
+
+Sirve para probar el asistente con casos preparados de antemano y medir cómo se comporta. Un plan es una lista de pasos. Cada paso tiene:
+
+- **momento:** cuánto avanza el reloj antes del paso (`+30m`, `+2h`, `+1d`);
+- **mensaje o archivo de la paciente:** el texto que escribe, o un archivo de prueba de `muestras/` con un comentario opcional;
+- **resultado esperado:** si tiene que haber alarma, la intención, si se deriva a la médica y con qué prioridad, qué valor se registra, si la pregunta está fuera de alcance, entre otros.
+
+Para usarlo:
+
+1. **Simular ▾ → Ejecutar un plan JSON…**
+2. Elegir un plan de ejemplo, cargar un archivo `.json` o pegar el JSON. La ventana avisa si hay un error y dice qué corregir.
+3. **Ejecutar plan.** Cada plan reinicia la demo, genera el asistente con su configuración (por ejemplo, con una alarma pausada) y manda los pasos uno por uno. Mientras corre, el chat queda bloqueado; se puede cancelar.
+4. La pestaña **Simulación** muestra el avance y, al terminar, el reporte:
+   - **Sensibilidad de alarmas:** de las urgencias esperadas, cuántas activaron el protocolo.
+   - **Falsos positivos:** alarmas que se activaron sin que correspondiera.
+   - **Fuera de alcance:** preguntas que el asistente no debía responder. Están bien manejadas si las derivó a la médica o las declinó sin dar contenido; el error es responderlas igual.
+   - **Derivaciones correctas:** pasos en los que se derivó, o no, a la médica como se esperaba.
+   - **Detalle paso por paso:** lo esperado, lo obtenido, qué no coincidió y la respuesta completa del asistente.
+
+   El reporte se puede descargar en JSON.
+
+Hay dos planes de ejemplo en `muestras/planes/`: *Un día de Marta* (un día completo con el reloj avanzando) y *Batería de alarmas y alcance* (casos con y sin urgencia, una alarma pausada, una agregada y preguntas fuera de alcance). El formato completo está en [`tests/README.md`](tests/README.md#formato-de-un-plan).
 
 ### Recorrido sugerido para una demo
 
@@ -114,9 +140,10 @@ Arriba, junto al título, se ve qué motor de IA está activo ("Motor IA: Claude
 2. Desde el teléfono, probar algunos chips: una dosis olvidada, un valor de glucemia, un pedido de turno o la pregunta por Ozempic.
 3. Adjuntar archivos de prueba, por ejemplo el glucómetro con 48 (dispara la alarma) o el informe de laboratorio.
 4. Pausar una alarma y repetir el mensaje para ver la diferencia.
-5. Usar **Simular 14 días** y recorrer el panel: responder una derivación y generar el resumen preconsulta.
+5. Usar **Simular ▾ → 14 días de ejemplo** y recorrer el panel: responder una derivación y generar el resumen preconsulta.
 6. Exportar el Bundle FHIR y simular la apertura en la HCE.
 7. Mirar las **Trazas del sistema** para explicar cómo se procesó cada mensaje.
+8. Ejecutar el plan *Batería de alarmas y alcance* y mostrar el reporte de la pestaña **Simulación**.
 
 ---
 
@@ -157,8 +184,8 @@ npm test generative   # con el LLM real configurado (Claude Code o API key): ~2-
 
 | Suite | Qué prueba |
 |---|---|
-| `logic` | Los tests están en `tests/logic/`: alarmas (frases, negación, umbrales, pausar, modificar, agregar, eliminar), guardrails (12 propuestas del modelo, 2 válidas y 10 tramposas), módulos (incluye una patología nueva agregada sólo con un JSON) y el recorrido completo de la app por la API. El recorrido corre en modo simulado y con un "Claude falso" (`tests/fixtures/fake-claude.js`) que devuelve respuestas tramposas a propósito. |
-| `generative` | `tests/generative/casos.json`: 14 casos clínicos contra el asistente con Claude real. Para cada paso se indica lo esperado: alarma sí/no y su origen, intención, derivación y prioridad, registro, fuente citada y consulta de evidencia. Al final informa la sensibilidad y los falsos positivos de las alarmas, y guarda el detalle en `tests/resultados/`. |
+| `logic` | Los tests están en `tests/logic/`: alarmas (frases, negación, umbrales, pausar, modificar, agregar, eliminar), guardrails (12 propuestas del modelo, 2 válidas y 10 tramposas), simulación con plan (validación, métricas, bloqueo mientras corre), módulos (incluye una patología nueva agregada sólo con un JSON) y el recorrido completo de la app por la API. El recorrido corre en modo simulado y con un "Claude falso" (`tests/fixtures/fake-claude.js`) que devuelve respuestas tramposas a propósito. |
+| `generative` | `tests/generative/casos.json`: 17 casos clínicos contra el asistente con Claude real. Usan el mismo formato y la misma comparación que *Simular con un plan JSON*. Para cada paso se indica lo esperado: alarma sí/no y su origen, intención, derivación y prioridad, registro, fuente citada, consulta de evidencia y si está fuera de alcance. Al final informa sensibilidad y falsos positivos de las alarmas, derivaciones correctas y preguntas fuera de alcance, y guarda el detalle en `tests/resultados/`. |
 
 Los tests usan una carpeta de estado temporal y un puerto propio, así que no tocan la demo en `data/`. La suite `generative` no es determinística; para ver la variabilidad se puede repetir cada caso: `GENERATIVE_REPEAT=3 npm test generative`. La guía completa para correr, crear, modificar y validar tests está en [`tests/README.md`](tests/README.md).
 
@@ -245,9 +272,13 @@ src/clinic.js          observaciones, tomas, alertas, métricas (PDC)
 src/fhir.js            Bundle FHIR R4 + CDS Hooks
 src/terminologia.js    SNOMED CT y UCUM para el export
 src/seed.js            14 días de datos de ejemplo
+src/configuracion.js   acciones de la médica: importar la HCE, generar el asistente, alarmas
+src/simulacion.js      simulación con un plan JSON (validación, ejecución en segundo plano)
+src/evaluacion.js      obtenido vs. esperado y métricas (sensibilidad, falsos positivos, …)
 src/mocks/             HCE, OpenEvidence, agenda
 knowledge/             módulos DM2 y HTA + alarmas genéricas + terminologías (SNOMED CT, UCUM)
 muestras/              archivos de prueba (ficticios)
+muestras/planes/       planes JSON de ejemplo para Simular
 public/                interfaz
 tests/                 tests (npm test logic | generative)
 data/                  estado de la simulación (se crea solo)
