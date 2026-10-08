@@ -2,6 +2,7 @@
 const S = require('./state');
 const C = require('./clinic');
 const hce = require('./mocks/hce');
+const M = require('./modulos');
 const { fmtDateTime } = require('./util');
 
 const P = { reference: `Patient/${hce.PATIENT_ID}`, display: 'Marta González' };
@@ -17,11 +18,25 @@ function bundle(baseUrl = 'http://localhost:3000') {
 
   const cfg = st.assistant && st.assistant.config;
   if (cfg) {
-    const goals = [
-      { id: 'goal-glu', text: `Glucemia en ayunas ${cfg.metas.ayunasMin}-${cfg.metas.ayunasMax} mg/dL`, loinc: '1558-6', low: cfg.metas.ayunasMin, high: cfg.metas.ayunasMax, unit: 'mg/dL' },
-      { id: 'goal-hba1c', text: `HbA1c < ${cfg.metas.hba1c}%`, loinc: '4548-4', high: cfg.metas.hba1c, unit: '%' },
-      { id: 'goal-pa', text: `Presión arterial < ${cfg.metas.paSis}/${cfg.metas.paDia} mmHg`, loinc: '85354-9' },
-    ];
+    // un Goal por variable con meta (según los módulos activos) y uno de texto para las metas sin variable
+    const goals = [];
+    for (const id of M.activos(cfg)) {
+      const mc = M.get(id).configuracion;
+      const porVar = {};
+      for (const m of mc.metas) {
+        if (!m.variable) {
+          goals.push({ id: `goal-${id}-${m.clave}`, text: `${m.etiqueta} ${cfg.metas[m.clave]} ${m.unidad}`.trim(), modulo: id });
+          continue;
+        }
+        porVar[m.variable] = porVar[m.variable] || { low: null, high: null };
+        porVar[m.variable][m.limite === 'min' ? 'low' : 'high'] = cfg.metas[m.clave];
+      }
+      for (const [v, r] of Object.entries(porVar)) {
+        const def = mc.variables[v] || {};
+        const rango = r.low != null && r.high != null ? `${r.low}–${r.high}` : r.high != null ? `< ${r.high}` : `> ${r.low}`;
+        goals.push({ id: `goal-${id}-${v}`, text: `${def.etiqueta || v} ${rango} ${def.unidad || ''}`.trim(), loinc: def.loinc, low: r.low, high: r.high, unit: def.ucum || def.unidad, modulo: id });
+      }
+    }
     for (const g of goals) {
       add({
         resourceType: 'Goal',
@@ -29,7 +44,8 @@ function bundle(baseUrl = 'http://localhost:3000') {
         lifecycleStatus: 'active',
         description: { text: g.text },
         subject: P,
-        target: g.unit ? [{ measure: { coding: [{ system: 'http://loinc.org', code: g.loinc }] }, detailRange: { low: g.low != null ? { value: g.low, unit: g.unit } : undefined, high: { value: g.high, unit: g.unit } } }] : undefined,
+        addresses: (M.get(g.modulo).snomed || []).map((c) => ({ display: `SNOMED CT ${c}` })),
+        target: g.loinc ? [{ measure: { coding: [{ system: 'http://loinc.org', code: g.loinc }] }, detailRange: { low: g.low != null ? { value: g.low, unit: g.unit } : undefined, high: g.high != null ? { value: g.high, unit: g.unit } : undefined } }] : undefined,
       });
     }
     add({

@@ -15,7 +15,7 @@ const ALM = require('./src/alarmas');
 const hce = require('./src/mocks/hce');
 const OE = require('./src/mocks/openevidence');
 const { seed14 } = require('./src/seed');
-const { MODULOS_DISPONIBLES, getBase } = require('./src/rag');
+const MOD = require('./src/modulos');
 const { uid, fmtDateTime } = require('./src/util');
 
 const app = express();
@@ -67,10 +67,11 @@ app.get('/api/state', (req, res) => {
 
 app.get('/api/catalog', (req, res) => {
   res.json({
-    alarmas: { variables: ALM.VARIABLES, operadores: ALM.OPERADORES, origenes: ALM.ORIGENES },
+    alarmas: { variables: MOD.variables(), operadores: ALM.OPERADORES, origenes: ALM.origenes() },
     temas: A.TEMAS,
     niveles: A.NIVELES,
-    modulos: MODULOS_DISPONIBLES.map((m) => ({ ...m, fuente: m.disponible ? getBase(m.id).fuente : null, fragmentos: m.disponible ? getBase(m.id).fragmentos.map((f) => ({ id: f.id, titulo: f.titulo })) : [] })),
+    modulos: MOD.catalogo(),
+    umbralesGenerales: MOD.UMBRALES_GENERALES,
   });
 });
 

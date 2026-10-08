@@ -6,32 +6,24 @@
 const fs = require('fs');
 const path = require('path');
 const { uid, normalize } = require('./util');
+const M = require('./modulos');
 
 const GENERICAS = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'knowledge', 'alarmas_genericas.json'), 'utf8'));
 
 const AZUCAR = 'Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común).';
 
-// Criterios por patología (provisorio: en el punto 2 pasan a los módulos de knowledge/)
-const POR_MODULO = {
-  dm2: [
-    { id: 'dm2-hipo-grave', nombre: 'Hipoglucemia grave', tipo: 'umbral', variable: 'glucemia', operador: '<', umbralRef: 'hipoGrave', instruccion: AZUCAR },
-    { id: 'dm2-hipo-grave-referida', nombre: 'Hipoglucemia grave referida', tipo: 'texto', frases: ['hipoglucemia grave', 'no reacciona', 'no se despierta'], instruccion: AZUCAR },
-    { id: 'dm2-hipo-signos', nombre: 'Hipoglucemia con signos de gravedad', tipo: 'umbral', variable: 'glucemia', operador: '<', umbralRef: 'hipo', sintomas: ['muy mal', 'no puedo', 'confund', 'no me puedo levantar'], instruccion: AZUCAR },
-    { id: 'dm2-hiper-sintomas', nombre: 'Hiperglucemia con síntomas de alarma', tipo: 'umbral', variable: 'glucemia', operador: '>', umbralRef: 'hiperGrave', sintomas: ['vomit', 'somnolien', 'dormida', 'respir'] },
-  ],
-  hta: [
-    { id: 'hta-pas-sintomas', nombre: 'PA sistólica muy alta con síntomas', tipo: 'umbral', variable: 'pa_sistolica', operador: '>=', umbralRef: 'paSisAlarma', sintomas: ['dolor', 'cabeza', 'vision', 'hablar', 'pecho'] },
-    { id: 'hta-pad-sintomas', nombre: 'PA diastólica muy alta con síntomas', tipo: 'umbral', variable: 'pa_diastolica', operador: '>=', umbralRef: 'paDiaAlarma', sintomas: ['dolor', 'cabeza', 'vision', 'hablar', 'pecho'] },
-  ],
-};
+// Los criterios por patología vienen de cada módulo (knowledge/<id>.json → configuracion.alarmas)
+function porModulo(id) {
+  const m = M.get(id);
+  return m ? m.configuracion.alarmas : [];
+}
 
-const VARIABLES = {
-  glucemia: { label: 'Glucemia', unidad: 'mg/dl' },
-  pa_sistolica: { label: 'PA sistólica', unidad: 'mmHg' },
-  pa_diastolica: { label: 'PA diastólica', unidad: 'mmHg' },
-};
 const OPERADORES = ['<', '<=', '>', '>='];
-const ORIGENES = { generica: 'Genérica', medica: 'Agregada por la médica', dm2: 'Módulo DM2', hta: 'Módulo HTA' };
+function origenes() {
+  const o = { generica: 'Genérica', medica: 'Agregada por la médica' };
+  for (const id of M.ids()) o[id] = `Módulo ${M.get(id).nombre}`;
+  return o;
+}
 
 function nueva(base, origen) {
   return { ...JSON.parse(JSON.stringify(base)), origen, activa: true };
@@ -42,11 +34,11 @@ function ensure(cfg) {
   if (!cfg) return cfg;
   cfg.alarmas = Array.isArray(cfg.alarmas) ? cfg.alarmas : [];
   cfg.alarmasEliminadas = Array.isArray(cfg.alarmasEliminadas) ? cfg.alarmasEliminadas : [];
-  if (cfg.umbrales && cfg.umbrales.paDiaAlarma == null) cfg.umbrales.paDiaAlarma = 110;
+  M.ensureConfig(cfg); // metas y umbrales por defecto de los módulos activos
   const ids = new Set(cfg.alarmas.map((a) => a.id));
   for (const g of GENERICAS.alarmas) if (!ids.has(g.id)) cfg.alarmas.push(nueva(g, 'generica'));
   for (const mod of cfg.modulos || []) {
-    for (const a of POR_MODULO[mod] || []) {
+    for (const a of porModulo(mod)) {
       if (!ids.has(a.id) && !cfg.alarmasEliminadas.includes(a.id)) cfg.alarmas.push(nueva(a, mod));
     }
   }
@@ -64,9 +56,9 @@ function valorUmbral(a, cfg) {
 
 function describir(a, cfg) {
   if (a.tipo === 'texto') return `el mensaje menciona: ${a.frases.map((f) => `"${f}"`).join(', ')}`;
-  const v = VARIABLES[a.variable] || { label: a.variable, unidad: '' };
+  const v = M.variables()[a.variable] || { etiqueta: a.variable, unidad: '' };
   const s = a.sintomas && a.sintomas.length ? ` y además menciona: ${a.sintomas.map((f) => `"${f}"`).join(', ')}` : '';
-  return `${v.label} ${a.operador} ${valorUmbral(a, cfg)} ${v.unidad}${s}`;
+  return `${v.etiqueta} ${a.operador} ${valorUmbral(a, cfg)} ${v.unidad}${s}`;
 }
 
 // ---------------- Coincidencia de frases (con negación simple) ----------------
@@ -103,6 +95,7 @@ function evaluarReglas(datos, cfg) {
     glucemia: datos.glucemia ?? null,
     pa_sistolica: datos.presion ? datos.presion.sis : null,
     pa_diastolica: datos.presion ? datos.presion.dia : null,
+    ...(datos.medidas || {}),
   };
   for (const a of cfg.alarmas || []) {
     if (!aplica(a, cfg)) continue;
@@ -118,7 +111,7 @@ function evaluarReglas(datos, cfg) {
         s = coincideAlguna(t, a.sintomas);
         if (!s) continue;
       }
-      const u = VARIABLES[a.variable] ? VARIABLES[a.variable].unidad : '';
+      const u = (M.variables()[a.variable] || {}).unidad || '';
       out.push({ id: a.id, nombre: a.nombre, motivo: `${a.nombre} (${v} ${u})`, detalle: `${a.variable} ${v} ${a.operador} ${lim}${s ? ` + "${s}"` : ''}`, instruccion: a.instruccion || null });
     }
   }
@@ -136,7 +129,7 @@ function validar(a) {
   if (a.tipo === 'texto') {
     if (!a.frases || !a.frases.length) throw new Error('Agregá al menos una frase (3 letras o más)');
   } else if (a.tipo === 'umbral') {
-    if (!VARIABLES[a.variable]) throw new Error('Variable no válida');
+    if (!M.variables()[a.variable]) throw new Error('Variable no válida');
     if (!OPERADORES.includes(a.operador)) throw new Error('Operador no válido');
     if (!a.umbralRef && (a.valor === undefined || a.valor === null || isNaN(Number(a.valor)))) throw new Error('Indicá un valor numérico');
   } else throw new Error('Tipo de alarma no válido');
@@ -201,4 +194,4 @@ function eliminar(cfg, id) {
   return a;
 }
 
-module.exports = { ensure, aplica, describir, evaluarReglas, crear, modificar, eliminar, valorUmbral, VARIABLES, OPERADORES, ORIGENES, AZUCAR };
+module.exports = { ensure, aplica, describir, evaluarReglas, crear, modificar, eliminar, valorUmbral, OPERADORES, origenes, AZUCAR };

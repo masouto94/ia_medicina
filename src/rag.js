@@ -1,25 +1,18 @@
 // Recuperación (la "R" de RAG) sobre las bases especializadas por patología.
 // Para la demo se usa un ranking léxico tipo BM25; en producción sería un índice vectorial.
-const fs = require('fs');
-const path = require('path');
 const { tokens } = require('./util');
 
-const MODULOS_DISPONIBLES = [
-  { id: 'dm2', nombre: 'Diabetes tipo 2', disponible: true },
-  { id: 'hta', nombre: 'Hipertensión arterial', disponible: true },
-  { id: 'ic', nombre: 'Insuficiencia cardíaca', disponible: false },
-  { id: 'epoc', nombre: 'EPOC', disponible: false },
-  { id: 'aco', nombre: 'Anticoagulación', disponible: false },
-];
+const M = require('./modulos');
 
+// Bases de conocimiento: los fragmentos de cada módulo de knowledge/
 const bases = {};
-for (const m of MODULOS_DISPONIBLES.filter((m) => m.disponible)) {
-  const data = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'knowledge', `${m.id}.json`), 'utf8'));
+for (const id of M.ids()) {
+  const data = M.get(id);
   data.fragmentos.forEach((f) => {
-    f.modulo = m.id;
+    f.modulo = id;
     f._tok = tokens(`${f.titulo} ${f.tema} ${f.palabras} ${f.palabras} ${f.texto}`);
   });
-  bases[m.id] = data;
+  bases[id] = data;
 }
 
 function getBase(id) {
@@ -79,4 +72,4 @@ function getChunk(id, cfg) {
   return null;
 }
 
-module.exports = { MODULOS_DISPONIBLES, retrieve, getChunk, getBase, planChunks };
+module.exports = { retrieve, getChunk, getBase, planChunks };

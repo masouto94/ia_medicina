@@ -1,5 +1,6 @@
 // Lógica clínica de registro: observaciones, tomas, alertas, derivaciones, mensajes y métricas.
 const S = require('./state');
+const M = require('./modulos');
 const { uid, atLocalTime, localDayKey, fmtTime } = require('./util');
 
 const LOINC = {
@@ -53,25 +54,13 @@ function addTopic(tema) {
   st.topics[k] = (st.topics[k] || 0) + 1;
 }
 
-// Controla umbrales configurados por la médica
+// Controla las alertas de los módulos activos con los umbrales y metas configurados por la médica
 function checkThresholds(obs) {
   const st = S.get();
   const cfg = st.assistant && st.assistant.config;
   if (!cfg) return;
-  const u = cfg.umbrales;
-  if (obs.tipo === 'glucemia') {
-    if (obs.valor < u.hipoGrave) addAlert('alta', `Hipoglucemia grave: ${obs.valor} mg/dl`, { obsId: obs.id });
-    else if (obs.valor < u.hipo) addAlert('media', `Hipoglucemia: ${obs.valor} mg/dl`, { obsId: obs.id });
-    else if (obs.valor > u.hiperGrave) addAlert('alta', `Hiperglucemia marcada: ${obs.valor} mg/dl`, { obsId: obs.id });
-    else if (obs.valor > u.hiper) addAlert('media', `Glucemia elevada: ${obs.valor} mg/dl`, { obsId: obs.id });
-  }
-  if (obs.tipo === 'presion') {
-    if (obs.valor >= u.paSisAlarma || obs.valor2 >= u.paDiaAlarma) addAlert('alta', `Presión muy elevada: ${obs.valor}/${obs.valor2} mmHg`, { obsId: obs.id });
-    else if (obs.valor >= u.paSis || obs.valor2 >= u.paDia) addAlert('baja', `Presión por encima de la meta: ${obs.valor}/${obs.valor2} mmHg`, { obsId: obs.id });
-  }
-  if (obs.tipo === 'hba1c' && obs.valor > cfg.metas.hba1c) {
-    addAlert('baja', `HbA1c ${obs.valor}% por encima de la meta (<${cfg.metas.hba1c}%)`, { obsId: obs.id });
-  }
+  const a = M.evaluarAlerta(obs, cfg);
+  if (a) addAlert(a.nivel, a.motivo, { obsId: obs.id, reglaId: a.reglaId });
 }
 
 // ---------- Tomas de medicación ----------

@@ -63,6 +63,19 @@ El motor activo se ve arriba, junto al título (“Motor IA: Claude Code · sonn
 
 En modo simulado, el tipo de foto se deduce del nombre del archivo (por ejemplo, `glucometro_120.jpg` o `tensiometro_150_90.jpg`). Con IA real, se analiza la imagen.
 
+## Cómo agregar una patología (sin tocar código)
+
+Cada módulo es un archivo `knowledge/<id>.json` con dos partes:
+
+- `fragmentos`: el conocimiento validado que usa el RAG.
+- `configuracion`: los valores por defecto de la patología, que la médica después ajusta por paciente.
+  - `variables`: las mediciones, con unidad, UCUM y LOINC.
+  - `metas`, `umbrales` y `alertas`: los avisos no urgentes a la médica.
+  - `alarmas`: el protocolo de urgencia.
+  - `instruccionesModelo`: pautas para el modelo, que pueden usar `{umbrales.x}` y `{metas.x}`.
+
+El campo `snomed` indica para qué diagnósticos de la HCE se activa el módulo por defecto. Al copiar `dm2.json` o `hta.json` como plantilla y reiniciar la app, el módulo nuevo aparece en el panel con sus campos y sus alarmas.
+
 ## Estructura
 
 ```
@@ -70,12 +83,14 @@ server.js              API + archivos estáticos
 src/assistant.js       pipeline: seguridad → RAG → LLM → registro/evidencia/derivación/turnos
 src/vision.js          fotos e informes (registro, no diagnóstico)
 src/safety.js          señales de alarma y umbrales
-src/rag.js             recuperación sobre knowledge/*.json
+src/modulos.js         carga los módulos (conocimiento + configuración por patología)
+src/alarmas.js         alarmas configurables (genéricas + módulos + médica)
+src/rag.js             recuperación sobre los fragmentos de los módulos
 src/clinic.js          observaciones, tomas, alertas, métricas (PDC)
 src/fhir.js            Bundle FHIR R4 + CDS Hooks
 src/seed.js            14 días de datos de ejemplo
 src/mocks/             HCE, OpenEvidence, agenda
-knowledge/             bases especializadas DM2 y HTA
+knowledge/             módulos DM2 y HTA + alarmas genéricas
 muestras/              archivos de prueba (ficticios)
 public/                interfaz
 data/                  estado de la simulación (se crea solo)

@@ -5,6 +5,7 @@ const S = require('./state');
 const C = require('./clinic');
 const llm = require('./llm');
 const safety = require('./safety');
+const M = require('./modulos');
 const { normalize, uid, fmtDateTime } = require('./util');
 
 const TOOL = {
@@ -42,7 +43,7 @@ const TOOL = {
 function systemPrompt(cfg) {
   return `Sos el módulo multimodal del asistente de seguimiento de ${cfg.paciente.nombre}, configurado por ${cfg.medico.nombre}. La paciente te envía fotos o documentos por WhatsApp. Tu función es de REGISTRO, no de diagnóstico.
 Medicación del plan: ${cfg.medicacion.map((m) => m.nombre).join(', ')}.
-Metas: glucemia en ayunas ${cfg.metas.ayunasMin}-${cfg.metas.ayunasMax} mg/dl; HbA1c < ${cfg.metas.hba1c}%.
+Metas configuradas por la médica: ${M.metasTexto(cfg) || '—'}.
 Reglas:
 - glucometro: leé el valor de la pantalla en mg/dl. Si no es legible con seguridad, legible=false y pedí que lo escriba.
 - tensiometro: leé sistólica, diastólica y pulso.

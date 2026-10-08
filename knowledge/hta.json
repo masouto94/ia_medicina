@@ -1,7 +1,139 @@
 {
   "id": "hta",
   "nombre": "Hipertensión arterial",
+  "version": "1.1.0",
+  "snomed": [
+    "38341003"
+  ],
   "fuente": "Adaptación educativa simplificada a partir de guías nacionales de manejo de la hipertensión arterial en el primer nivel de atención (Ministerio de Salud). Contenido de demostración: debe ser validado por el equipo de salud.",
+  "configuracion": {
+    "descripcion": "Configuración por defecto del módulo. La médica la ajusta por paciente desde el panel.",
+    "variables": {
+      "pa_sistolica": {
+        "etiqueta": "PA sistólica",
+        "unidad": "mmHg",
+        "ucum": "mm[Hg]",
+        "loinc": "8480-6"
+      },
+      "pa_diastolica": {
+        "etiqueta": "PA diastólica",
+        "unidad": "mmHg",
+        "ucum": "mm[Hg]",
+        "loinc": "8462-4"
+      }
+    },
+    "metas": [
+      {
+        "clave": "paSis",
+        "etiqueta": "PA sistólica <",
+        "unidad": "mmHg",
+        "valor": 130,
+        "variable": "pa_sistolica",
+        "limite": "max"
+      },
+      {
+        "clave": "paDia",
+        "etiqueta": "PA diastólica <",
+        "unidad": "mmHg",
+        "valor": 80,
+        "variable": "pa_diastolica",
+        "limite": "max"
+      }
+    ],
+    "umbrales": [
+      {
+        "clave": "paSis",
+        "etiqueta": "PA sistólica alerta ≥",
+        "unidad": "mmHg",
+        "valor": 140
+      },
+      {
+        "clave": "paDia",
+        "etiqueta": "PA diastólica alerta ≥",
+        "unidad": "mmHg",
+        "valor": 90
+      },
+      {
+        "clave": "paSisAlarma",
+        "etiqueta": "PA sistólica alarma ≥",
+        "unidad": "mmHg",
+        "valor": 180
+      },
+      {
+        "clave": "paDiaAlarma",
+        "etiqueta": "PA diastólica alarma ≥",
+        "unidad": "mmHg",
+        "valor": 110
+      }
+    ],
+    "alertas": [
+      {
+        "id": "hta-alerta-pas-alarma",
+        "nombre": "Presión muy elevada",
+        "variable": "pa_sistolica",
+        "operador": ">=",
+        "umbralRef": "paSisAlarma",
+        "nivel": "alta"
+      },
+      {
+        "id": "hta-alerta-pad-alarma",
+        "nombre": "Presión muy elevada",
+        "variable": "pa_diastolica",
+        "operador": ">=",
+        "umbralRef": "paDiaAlarma",
+        "nivel": "alta"
+      },
+      {
+        "id": "hta-alerta-pas",
+        "nombre": "Presión por encima del umbral",
+        "variable": "pa_sistolica",
+        "operador": ">=",
+        "umbralRef": "paSis",
+        "nivel": "baja"
+      },
+      {
+        "id": "hta-alerta-pad",
+        "nombre": "Presión por encima del umbral",
+        "variable": "pa_diastolica",
+        "operador": ">=",
+        "umbralRef": "paDia",
+        "nivel": "baja"
+      }
+    ],
+    "alarmas": [
+      {
+        "id": "hta-pas-sintomas",
+        "nombre": "PA sistólica muy alta con síntomas",
+        "tipo": "umbral",
+        "variable": "pa_sistolica",
+        "operador": ">=",
+        "umbralRef": "paSisAlarma",
+        "sintomas": [
+          "dolor",
+          "cabeza",
+          "vision",
+          "hablar",
+          "pecho"
+        ]
+      },
+      {
+        "id": "hta-pad-sintomas",
+        "nombre": "PA diastólica muy alta con síntomas",
+        "tipo": "umbral",
+        "variable": "pa_diastolica",
+        "operador": ">=",
+        "umbralRef": "paDiaAlarma",
+        "sintomas": [
+          "dolor",
+          "cabeza",
+          "vision",
+          "hablar",
+          "pecho"
+        ]
+      }
+    ],
+    "instruccionesModelo": []
+  },
   "fragmentos": [
     {
       "id": "HTA-01",

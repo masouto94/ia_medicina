@@ -185,6 +185,8 @@ function renderForm() {
   const c = configDraft;
   const box = $('#cfgForm');
   if (!box) return;
+  aplicarDefaultsModulos(c);
+  const modsActivos = CAT.modulos.filter((m) => m.disponible && c.modulos.includes(m.id));
   const num = (path, label, step = 1) => {
     const [g, k] = path.split('.');
     return `<label class="field">${label}<input type="number" step="${step}" data-cfg="${path}" value="${c[g][k]}"></label>`;
@@ -201,31 +203,22 @@ function renderForm() {
       </div>
       <div class="grid2">
         <div class="section">
-          <h3>Metas terapéuticas</h3>
-          <div class="inline-fields">
-            ${num('metas.ayunasMin', 'Ayunas mín (mg/dl)')}${num('metas.ayunasMax', 'Ayunas máx (mg/dl)')}
-            ${num('metas.posprandialMax', 'Posprandial máx')}${num('metas.hba1c', 'HbA1c < (%)', 0.1)}
-            ${num('metas.paSis', 'PA sistólica <')}${num('metas.paDia', 'PA diastólica <')}
-          </div>
+          <h3>Metas terapéuticas <span class="hint">por defecto, las del módulo</span></h3>
+          ${modsActivos.map((m) => `<div class="small muted" style="margin:6px 0 4px">${esc(m.nombre)}</div><div class="inline-fields">${m.configuracion.metas.map((x) => num(`metas.${x.clave}`, `${x.etiqueta}${x.unidad ? ` (${x.unidad})` : ''}`, x.step || 1)).join('')}</div>`).join('') || '<div class="muted small">Activá un módulo para ver sus metas.</div>'}
         </div>
         <div class="section">
-          <h3>Umbrales de alerta</h3>
-          <div class="inline-fields">
-            ${num('umbrales.hipo', 'Hipoglucemia <')}${num('umbrales.hipoGrave', 'Hipo grave (alarma) <')}
-            ${num('umbrales.hiper', 'Glucemia alta >')}${num('umbrales.hiperGrave', 'Glucemia marcada >')}
-            ${num('umbrales.paSis', 'PA sist. alerta ≥')}${num('umbrales.paDia', 'PA diast. alerta ≥')}
-            ${num('umbrales.paSisAlarma', 'PA sist. alarma ≥')}${num('umbrales.paDiaAlarma', 'PA diast. alarma ≥')}
-            ${num('umbrales.omisionesConsecutivas', 'Omisiones seguidas')}
-          </div>
+          <h3>Umbrales de alerta <span class="hint">avisos a la médica; las alarmas se configuran abajo</span></h3>
+          ${modsActivos.map((m) => `<div class="small muted" style="margin:6px 0 4px">${esc(m.nombre)}</div><div class="inline-fields">${m.configuracion.umbrales.map((x) => num(`umbrales.${x.clave}`, `${x.etiqueta}${x.unidad ? ` (${x.unidad})` : ''}`, x.step || 1)).join('')}</div>`).join('')}
+          <div class="small muted" style="margin:6px 0 4px">General</div><div class="inline-fields">${CAT.umbralesGenerales.map((x) => num(`umbrales.${x.clave}`, x.etiqueta)).join('')}</div>
         </div>
       </div>
       <div class="grid2">
         <div class="section">
           <h3>Bases especializadas (módulos por patología)</h3>
           <div class="checks" style="grid-template-columns:1fr">
-            ${CAT.modulos.map((m) => `<label class="check ${m.disponible ? '' : 'disabled'}"><input type="checkbox" data-mod="${m.id}" ${c.modulos.includes(m.id) ? 'checked' : ''} ${m.disponible ? '' : 'disabled'}> <span>${esc(m.nombre)}${m.disponible ? ` <span class="muted small">· ${m.fragmentos.length} fragmentos</span>` : ' <span class="muted small">(próximamente)</span>'}</span></label>`).join('')}
+            ${CAT.modulos.map((m) => `<label class="check ${m.disponible ? '' : 'disabled'}"><input type="checkbox" data-mod="${m.id}" ${c.modulos.includes(m.id) ? 'checked' : ''} ${m.disponible ? '' : 'disabled'}> <span>${esc(m.nombre)}${m.disponible ? ` <span class="muted small">· v${esc(m.version)} · ${m.fragmentos.length} fragmentos · ${m.configuracion.metas.length} metas · ${m.configuracion.umbrales.length} umbrales · ${m.configuracion.alarmas.length} alarmas</span>` : ' <span class="muted small">(próximamente)</span>'}</span></label>`).join('')}
           </div>
-          <p class="small muted" style="margin:8px 0 0">Contenido educativo basado en guías nacionales y validado por el equipo de salud. Combinables en multimorbilidad.</p>
+          <p class="small muted" style="margin:8px 0 0">Cada módulo trae su conocimiento (fragmentos validados) y su configuración por defecto (metas, umbrales y alarmas). Combinables en multimorbilidad. Se agregan como archivos en <span class="mono">knowledge/</span>, sin tocar código.</p>
         </div>
         <div class="section">
           <h3>Temas que el asistente puede abordar</h3>
@@ -254,6 +247,16 @@ function renderForm() {
       </div>
     </div>`;
   updateCfgJson();
+}
+
+// Al activar un módulo, sus metas y umbrales por defecto se suman a la configuración (sin pisar lo editado)
+function aplicarDefaultsModulos(c) {
+  c.metas = c.metas || {};
+  c.umbrales = c.umbrales || {};
+  for (const m of CAT.modulos.filter((x) => x.disponible && c.modulos.includes(x.id))) {
+    for (const x of m.configuracion.metas) if (c.metas[x.clave] == null) c.metas[x.clave] = x.valor;
+    for (const x of m.configuracion.umbrales) if (c.umbrales[x.clave] == null) c.umbrales[x.clave] = x.valor;
+  }
 }
 
 function readForm() {
@@ -397,7 +400,7 @@ function renderPanel() {
     <div class="kpis">
       <div class="kpi"><div class="label">Proporción de días cubiertos</div><div class="value">${m.pdc ?? '—'}${m.pdc != null ? '%' : ''}</div><div class="sub">${m.diasCubiertos}/${m.diasEvaluados} días · 14 d</div>${st(m.pdc, 80, 60)}</div>
       <div class="kpi"><div class="label">Tomas confirmadas</div><div class="value">${m.adherenciaTomas ?? '—'}${m.adherenciaTomas != null ? '%' : ''}</div><div class="sub">${m.tomasEvaluadas} tomas evaluadas</div></div>
-      <div class="kpi"><div class="label">Glucemia en ayunas (prom.)</div><div class="value">${m.glucemiaAyunasPromedio ?? '—'}</div><div class="sub">mg/dl · meta ${cfg.metas.ayunasMin}–${cfg.metas.ayunasMax}</div></div>
+      <div class="kpi"><div class="label">Glucemia en ayunas (prom.)</div><div class="value">${m.glucemiaAyunasPromedio ?? '—'}</div><div class="sub">mg/dl${cfg.metas.ayunasMin != null ? ` · meta ${cfg.metas.ayunasMin}–${cfg.metas.ayunasMax}` : ''}</div></div>
       <div class="kpi"><div class="label">Glucemias en meta</div><div class="value">${m.tiempoEnMeta ?? '—'}${m.tiempoEnMeta != null ? '%' : ''}</div><div class="sub">${m.glucemiasRegistradas} registros</div>${st(m.tiempoEnMeta, 70, 50)}</div>
       <div class="kpi"><div class="label">Alertas abiertas</div><div class="value" style="color:${m.alertasAbiertas ? 'var(--critical)' : 'inherit'}">${m.alertasAbiertas}</div><div class="sub">${S.alerts.filter((a) => !a.ack && a.nivel === 'alta').length} de prioridad alta</div></div>
       <div class="kpi"><div class="label">Derivaciones pendientes</div><div class="value">${m.derivacionesPendientes}</div><div class="sub">${m.sugerenciasPendientes} sugerencia(s) de evidencia</div></div>
@@ -484,6 +487,7 @@ function glucoseChart(cfg) {
   const desde = S.clock - 14 * 86400e3;
   const pts = S.observations.filter((o) => o.tipo === 'glucemia' && o.ts > desde).sort((a, b) => a.ts - b.ts);
   if (!pts.length) return '<div class="empty">Todavía no hay glucemias registradas. Marta puede enviarlas por mensaje o con una foto del glucómetro.</div>';
+  if (cfg.metas.ayunasMin == null || cfg.umbrales.hipo == null) return '<div class="empty">El módulo de diabetes no está activo: no hay metas de glucemia para graficar.</div>';
   const W = 760, H = 240, L = 40, R = 12, T = 12, B = 26;
   const yMin = 40, yMax = Math.max(300, ...pts.map((p) => p.valor + 10));
   const x0 = desde, x1 = S.clock;
@@ -977,6 +981,7 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.closest('#cfgForm')) readForm();
+  if (e.target.dataset.mod) renderForm(); // cambia qué metas y umbrales se muestran
   if (e.target.dataset.almToggle) {
     const on = e.target.checked;
     alarmOp('PUT', `/api/alarms/${e.target.dataset.almToggle}`, { activa: on }, on ? 'Alarma reactivada' : 'Alarma pausada');
