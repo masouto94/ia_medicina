@@ -174,11 +174,48 @@ Los tests usan una carpeta de estado temporal y un puerto propio, así que no to
 | OpenEvidence API | **Mock** (`src/mocks/openevidence.js`): respuestas predefinidas con citas reales; la consulta se anonimiza antes de enviarse. |
 | WhatsApp Business | **Mock**: la interfaz simula el canal. |
 | Agenda de turnos | **Mock** (`src/mocks/agenda.js`) |
-| Exportación FHIR R4 y servicio CDS Hooks | **Real**: `GET /api/fhir/bundle`, `GET /cds-services`, `POST /cds-services/seguimiento-entre-consultas`. Terminologías: SNOMED CT en diagnósticos, medicación (también en `MedicationStatement`) y motivos de derivación (`Communication.reasonCode`); LOINC en observaciones; UCUM en todas las unidades. Los códigos están en `knowledge/terminologia.json` y en cada alarma. |
+| Exportación FHIR R4 y servicio CDS Hooks | **Real**: `GET /api/fhir/bundle`, `GET /cds-services`, `POST /cds-services/seguimiento-entre-consultas`. Terminologías: SNOMED CT en diagnósticos, medicación (también en `MedicationStatement`) y motivos de derivación (`Communication.reasonCode`); LOINC en observaciones; UCUM en todas las unidades. Los códigos están en `knowledge/terminologia.json` y en cada alarma; ver [Origen de los códigos](#origen-de-los-códigos-de-terminología). |
 
 Si el indicador del motor dice "Modo simulado", al pasar el mouse por encima se ve el motivo.
 
 En modo simulado, el tipo de foto se deduce del nombre del archivo (por ejemplo, `glucometro_120.jpg` o `tensiometro_150_90.jpg`). Con IA real, se analiza la imagen.
+
+## Origen de los códigos de terminología
+
+Los códigos SNOMED CT del export FHIR **no salen de un servidor de terminología oficial**. Durante el desarrollo no hubo acceso a uno, así que cada código se confirmó a mano el 08/10/2026, buscándolo en estas páginas públicas:
+
+| Código SNOMED CT | Concepto | Página consultada |
+|---|---|---|
+| 29857009 | Chest pain | [tx.fhir.org](https://tx.fhir.org) (servidor de terminología público de HL7) |
+| 267036007 | Dyspnea | [FindACode](https://www.findacode.com/snomed/267036007--dyspnea.html) |
+| 131148009 | Bleeding | [FindACode](https://www.findacode.com/snomed/131148009--bleeding.html) |
+| 386661006 | Fever | [FindACode](https://www.findacode.com/snomed/386661006--fever.html) |
+| 11429006 | Consultation | [FindACode](https://www.findacode.com/snomed/11429006--consultation.html) |
+| 419045004 | Loss of consciousness | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=419045004) |
+| 91175000 | Seizure | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=91175000) |
+| 230690007 | Cerebrovascular accident | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=230690007) |
+| 41291007 | Angioedema | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=41291007) |
+| 286933003 | Confusional state | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=286933003) |
+| 302866003 | Hypoglycemia | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=302866003) |
+| 80394007 | Hyperglycemia | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=80394007) |
+| 24184005 | Finding of increased blood pressure | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=24184005) |
+| 91019004 | Paresthesia | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=91019004) |
+| 416462003 | Wound | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=416462003) |
+| 49727002 | Cough | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=49727002) |
+| 281647001 | Adverse reaction | [BioPortal](https://bioportal.bioontology.org/ontologies/SNOMEDCT?p=classes&conceptid=281647001) |
+| 182836005 | Review of medication | [OpenCodelists](https://www.opencodelists.org/codelist/opensafely/medication-reviews-all-types/69f99fda/) |
+| 372567009 | Metformin (substance) | [CH EMED, ValueSet ActivePharmaceuticalIngredient](https://fhir.ch/ig/ch-emed/ValueSet-ActivePharmaceuticalIngredient.html) y [FindACode](https://www.findacode.com/snomed/372567009--metformin.html) |
+| 372658000 | Enalapril (substance) | [CH EMED, ValueSet ActivePharmaceuticalIngredient](https://fhir.ch/ig/ch-emed/ValueSet-ActivePharmaceuticalIngredient.html) |
+
+Algunos códigos **no se verificaron en esta etapa**:
+
+- **SNOMED CT de los diagnósticos del mock de la HCE:** 44054006 (diabetes tipo 2) y 38341003 (hipertensión).
+- **LOINC de las observaciones:** por ejemplo 4548-4 HbA1c, 2339-0 glucemia y 85354-9 presión arterial.
+- **Unidades UCUM:** mg/dL, mm[Hg] y %.
+
+Son códigos de uso muy difundido, pero se cargaron sin consultar una fuente durante el desarrollo.
+
+> Antes de cualquier uso real, todos los códigos tienen que validarse contra la **edición nacional vigente** de SNOMED CT (y LOINC/UCUM) con un servidor de terminología oficial, por ejemplo con la operación `$validate-code`. Las páginas consultadas son secundarias, y la edición internacional o la de EE. UU. que muestran puede diferir de la nacional.
 
 ## Cómo agregar una patología (sin tocar código)
 

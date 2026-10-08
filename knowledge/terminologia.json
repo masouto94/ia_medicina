@@ -1,5 +1,5 @@
 {
-  "descripcion": "Terminologías que usa el export FHIR. Los códigos SNOMED CT se verificaron contra navegadores públicos de SNOMED CT (Edición Internacional / US) el 08/10/2026; antes de un uso real deben validarse contra la edición nacional vigente.",
+  "descripcion": "Terminologías que usa el export FHIR. Los códigos SNOMED CT se confirmaron a mano el 08/10/2026 en páginas públicas (tx.fhir.org, BioPortal, FindACode, OpenCodelists, CH EMED), no en un servidor de terminología oficial: el detalle por código está en el README (Origen de los códigos de terminología). Antes de un uso real deben validarse contra la edición nacional vigente.",
   "sistemas": {
     "snomed": "http://snomed.info/sct",
     "ucum": "http://unitsofmeasure.org",
