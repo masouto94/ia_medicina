@@ -588,6 +588,9 @@ function renderEvidence() {
 // ================= HCE / FHIR =================
 let fhirCache = null;
 let cdsCache = null;
+// Vista de datos identificados abierta en la pestaña FHIR: null | { tipo: 'bundle' | 'hce', data }.
+// Abrir consulta al servidor (y queda auditado); cerrar sólo oculta y descarta los datos, sin generar entrada.
+let vistaDatos = null;
 function renderFhir() {
   // la pestaña muestra sólo cantidades (sin datos de la paciente); el Bundle completo se ve a pedido y queda auditado
   const sig = JSON.stringify([S.messages.length, S.observations.length, S.doses.length, S.media.length, S.referrals.length, S.appointments.length, S.summaries.length, S.assistant && S.assistant.actualizado, S.referrals.filter((r) => r.estado !== 'pendiente').length, (S.exportaciones || []).length]);
@@ -625,11 +628,11 @@ function renderFhir() {
         <div class="callout" style="margin-top:10px">Los datos de la paciente no se descargan a archivos: salen del sistema sólo hacia la HCE. Cada envío y cada vista del Bundle completo quedan en la auditoría.</div>
         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
           <button class="btn primary" id="btnExportHce" ${S.assistant ? '' : 'disabled'}>Enviar a la HCE</button>
-          <button class="btn" id="btnShowBundle" title="Queda registrado en la auditoría">Ver Bundle</button>
-          <button class="btn" id="btnShowHce" title="Queda registrado en la auditoría">Ver datos originales de la HCE</button>
+          <button class="btn ${vistaDatos && vistaDatos.tipo === 'bundle' ? 'active' : ''}" id="btnShowBundle" title="${vistaDatos && vistaDatos.tipo === 'bundle' ? 'Cerrar' : 'Abrir (queda registrado en la auditoría)'}">${vistaDatos && vistaDatos.tipo === 'bundle' ? 'Ocultar Bundle' : 'Ver Bundle'}</button>
+          <button class="btn ${vistaDatos && vistaDatos.tipo === 'hce' ? 'active' : ''}" id="btnShowHce" title="${vistaDatos && vistaDatos.tipo === 'hce' ? 'Cerrar' : 'Abrir (queda registrado en la auditoría)'}">${vistaDatos && vistaDatos.tipo === 'hce' ? 'Ocultar datos de la HCE' : 'Ver datos originales de la HCE'}</button>
           <span class="small muted">${ultima ? `Último envío: ${fDT(ultima.ts)} · ${ultima.total} recursos · ${exps.length} envío(s) en la sesión` : 'Todavía no se envió a la HCE'}</span>
         </div>
-        <pre class="json" id="bundleView" style="display:none;margin-top:10px"></pre>
+        ${vistaDatos ? `<pre class="json" id="bundleView" style="margin-top:10px">${esc(JSON.stringify(vistaDatos.data, null, 2))}</pre>` : ''}
       </div>
       <div class="section">
         <h3>CDS Hooks · <span class="mono">patient-view</span> <span class="hint">las alertas aparecen dentro de la HCE al abrir el registro</span></h3>
@@ -1229,6 +1232,7 @@ document.addEventListener('click', async (e) => {
     if (!confirm('¿Reiniciar la demo? Se borran todos los datos simulados.')) return;
     configDraft = null;
     cdsCache = null;
+    vistaDatos = null;
     Object.keys(rendered).forEach((k) => delete rendered[k]);
     await act('/api/sim/reset', {}, 'Demo reiniciada');
     switchTab('config');
@@ -1280,10 +1284,19 @@ document.addEventListener('click', async (e) => {
   }
   if (t.id === 'btnExportHce') return act('/api/hce/export', {}, 'Bundle enviado a la HCE');
   if (t.id === 'btnShowBundle' || t.id === 'btnShowHce') {
-    const pre = $('#bundleView');
-    const data = await api(t.id === 'btnShowBundle' ? '/api/fhir/bundle' : '/api/hce/bundle'); // acceso auditado
-    pre.textContent = JSON.stringify(data, null, 2);
-    pre.style.display = 'block';
+    const tipo = t.id === 'btnShowBundle' ? 'bundle' : 'hce';
+    if (vistaDatos && vistaDatos.tipo === tipo) {
+      vistaDatos = null; // cerrar: no consulta al servidor, no genera entrada en la auditoría
+    } else {
+      t.disabled = true;
+      try {
+        vistaDatos = { tipo, data: await api(tipo === 'bundle' ? '/api/fhir/bundle' : '/api/hce/bundle') }; // abrir: acceso auditado
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+    rendered['tab-fhir'] = null;
+    renderFhir();
     return;
   }
   if (t.id === 'btnCds') {

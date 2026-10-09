@@ -283,3 +283,4 @@ pre.json { background: #0f1720; color: #d6e2f0; padding: 12px; border-radius: 10
 pre.mini { font-size: 10.5px; max-height: 260px; max-width: 420px; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px; white-space: pre-wrap; }
 .provlink { color: #53bdeb; cursor: pointer; text-decoration: underline; }
 select.sm { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.btn.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-ink); }
