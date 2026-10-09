@@ -4,7 +4,7 @@
 // la HCE): en su lugar va un SEUDÓNIMO estable, `pac-` + HMAC-SHA256(clave, id de la paciente en la HCE).
 // - Estable: la misma paciente tiene siempre el mismo seudónimo, así sus registros se relacionan entre sí.
 // - Re-identificable sólo desde el sistema: hace falta la clave para calcular el seudónimo de una paciente.
-//   La clave sale de LOGS_SEUDONIMO_CLAVE (.env) o, si no está, se genera una vez en DATA_DIR/.clave-seudonimo.
+//   La clave sale de ENCRYPTION_KEY (.env) o, si no está, se genera una vez en DATA_DIR/.clave-seudonimo.
 //   Quien sólo tiene los logs no puede volver al nombre.
 const fs = require('fs');
 const path = require('path');
@@ -15,7 +15,7 @@ const hce = require('./mocks/hce');
 let clave = null;
 function obtenerClave() {
   if (clave) return clave;
-  if (process.env.LOGS_SEUDONIMO_CLAVE) return (clave = process.env.LOGS_SEUDONIMO_CLAVE);
+  if (process.env.ENCRYPTION_KEY) return (clave = process.env.ENCRYPTION_KEY);
   const archivo = path.join(path.dirname(S.UPLOADS_DIR), '.clave-seudonimo');
   try {
     clave = fs.readFileSync(archivo, 'utf8').trim();
