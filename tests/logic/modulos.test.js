@@ -17,6 +17,18 @@ test('DM2 y HTA traen metas, umbrales, alertas y alarmas por defecto', () => {
   assert.ok(cfg.alarmas.some((a) => a.origen === 'dm2') && cfg.alarmas.some((a) => a.origen === 'hta'));
 });
 
+test('cada medición tiene nombre visible y unidad (los usa el formulario de alarmas)', () => {
+  // regresión: el panel leía "label" en lugar de "etiqueta" y mostraba "undefined" al crear una alarma por umbral
+  const vars = M.variables();
+  assert.ok(Object.keys(vars).length >= 4);
+  for (const [clave, v] of Object.entries(vars)) {
+    assert.ok(typeof v.etiqueta === 'string' && v.etiqueta.trim(), `${clave}: falta "etiqueta"`);
+    assert.ok(typeof v.unidad === 'string' && v.unidad.trim(), `${clave}: falta "unidad"`);
+  }
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'app.js'), 'utf8');
+  assert.doesNotMatch(app, /variables\[[^\]]+\][^;\n]*\.label\b|V\[v\]\.label/, 'el panel tiene que leer "etiqueta" de las mediciones');
+});
+
 test('los módulos se activan según los diagnósticos SNOMED CT de la HCE', () => {
   assert.deepEqual(M.sugeridosPorDiagnostico(['44054006', '38341003']).sort(), ['dm2', 'hta']);
   assert.deepEqual(M.sugeridosPorDiagnostico(['44054006']), ['dm2']);

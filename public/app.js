@@ -299,9 +299,14 @@ function alarmCfg() {
 function valorAlarma(a, c) {
   return a.umbralRef ? c.umbrales[a.umbralRef] : a.valor;
 }
+// Nombre visible de una medición: los módulos (knowledge/*.json) la definen con "etiqueta"
+function nombreVariable(clave) {
+  const v = CAT.alarmas.variables[clave];
+  return (v && (v.etiqueta || v.label)) || clave;
+}
 function describirAlarma(a, c) {
   if (a.tipo === 'texto') return `Menciona: ${a.frases.map((f) => `“${esc(f)}”`).join(', ')}`;
-  const v = (CAT.alarmas.variables[a.variable] || {}).label || a.variable;
+  const v = nombreVariable(a.variable);
   const u = (CAT.alarmas.variables[a.variable] || {}).unidad || '';
   const sint = a.sintomas && a.sintomas.length ? ` <span class="muted">+ síntomas: ${a.sintomas.map((f) => `“${esc(f)}”`).join(', ')}</span>` : '';
   return `<b>${esc(v)} ${esc(a.operador)} ${esc(valorAlarma(a, c))}</b> ${u}${a.umbralRef ? ` <span class="muted small">(umbral “${a.umbralRef}”)</span>` : ''}${sint}`;
@@ -323,7 +328,7 @@ function alarmEditor(a, c) {
     ${tipo === 'texto'
       ? `<label class="field" style="margin-top:8px">Frases que la disparan (separadas por coma; sin tildes; puede ser el comienzo de una palabra)<textarea data-draft="${k('frases')}">${esc(a ? a.frases.join(', ') : '')}</textarea></label>`
       : `<div class="inline-fields" style="margin-top:8px;grid-template-columns:1.3fr .7fr 1fr">
-          <label class="field">Medición<select data-draft="${k('variable')}" ${a ? 'disabled' : ''}>${Object.keys(V).map((v) => `<option value="${v}" ${a && a.variable === v ? 'selected' : ''}>${V[v].label} (${V[v].unidad})</option>`).join('')}</select></label>
+          <label class="field">Medición<select data-draft="${k('variable')}" ${a ? 'disabled' : ''}>${Object.keys(V).map((v) => `<option value="${v}" ${a && a.variable === v ? 'selected' : ''}>${esc(nombreVariable(v))} (${esc(V[v].unidad || '')})</option>`).join('')}</select></label>
           <label class="field">Operador<select data-draft="${k('operador')}">${CAT.alarmas.operadores.map((o) => `<option ${(a ? a.operador : '<') === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
           <label class="field">Valor${a && a.umbralRef ? ` (umbral “${a.umbralRef}”)` : ''}<input type="number" data-draft="${k('valor')}" value="${a ? esc(valorAlarma(a, c)) : ''}"></label>
         </div>
