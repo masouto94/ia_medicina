@@ -123,7 +123,7 @@ function renderStepper() {
     { n: 2, t: 'Configurar el asistente', done: !!S.assistant, tab: 'config' },
     { n: 3, t: 'Seguimiento por WhatsApp', done: hasMsgs, tab: null },
     { n: 4, t: 'Panel y resumen preconsulta', done: S.summaries.length > 0, tab: 'panel' },
-    { n: 5, t: 'Exportar a la HCE (FHIR)', done: !!(S.exportaciones && S.exportaciones.length), tab: 'fhir' },
+    { n: 5, t: 'Exportar a la HCE (FHIR)', done: !!(S.exportaciones && S.exportaciones.some((e) => e.estado !== 'error')), tab: 'fhir' },
   ];
   const cur = steps.find((s) => !s.done);
   setHTML('stepper', steps.map((s) => `<div class="step ${s.done ? 'done' : ''} ${s === cur ? 'current' : ''}" data-goto="${s.tab || ''}"><b>${s.done ? '✓' : s.n}</b>${s.t}</div>`).join(''));
@@ -141,7 +141,7 @@ function renderConfig() {
         <div class="callout">Durante la consulta, la Dra. Lucía abre el panel e importa desde la historia clínica electrónica los datos básicos de Marta: diagnósticos, medicación vigente y últimos resultados.</div>
         <div class="section">
           <h3>Importar desde la HCE <span class="hint">integración HL7 FHIR (mock)</span></h3>
-          <p class="mono small muted">GET https://hce.institucion.ar/fhir/Patient/marta-001/$everything</p>
+          <p class="mono small muted">GET ${esc((CAT && CAT.hce && CAT.hce.url) || '')}/Patient/marta-001/$everything</p>
           <button class="btn primary" id="btnImport">Importar datos de Marta</button>
         </div>
       </div>`;
@@ -631,7 +631,9 @@ function renderFhir() {
           <button class="btn primary" id="btnExportHce" ${S.assistant ? '' : 'disabled'}>Enviar a la HCE</button>
           <button class="btn ${vistaDatos && vistaDatos.tipo === 'bundle' ? 'active' : ''}" id="btnShowBundle" title="${vistaDatos && vistaDatos.tipo === 'bundle' ? 'Cerrar' : 'Abrir (queda registrado en la auditoría)'}">${vistaDatos && vistaDatos.tipo === 'bundle' ? 'Ocultar Bundle' : 'Ver Bundle'}</button>
           <button class="btn ${vistaDatos && vistaDatos.tipo === 'hce' ? 'active' : ''}" id="btnShowHce" title="${vistaDatos && vistaDatos.tipo === 'hce' ? 'Cerrar' : 'Abrir (queda registrado en la auditoría)'}">${vistaDatos && vistaDatos.tipo === 'hce' ? 'Ocultar datos de la HCE' : 'Ver datos originales de la HCE'}</button>
-          <span class="small muted">${ultima ? `Último envío: ${fDT(ultima.ts)} · ${ultima.total} recursos · ${exps.length} envío(s) en la sesión` : 'Todavía no se envió a la HCE'}</span>
+          <span class="small muted">${ultima ? `${ultima.estado === 'error' ? `<span style="color:var(--critical)">Último envío fallido (${fDT(ultima.ts)}): ${esc(ultima.error)}</span>` : `Último envío: ${fDT(ultima.ts)} · ${ultima.total} recursos${ultima.modo === 'real' ? ` · ${ultima.aceptados} aceptados` : ''}`} · ${exps.length} envío(s) en la sesión` : 'Todavía no se envió a la HCE'}</span>
+        </div>
+        <div class="small muted" style="margin-top:6px">Destino: <span class="mono">${esc(fhirCache.resumen.hce.url)}</span> · ${fhirCache.resumen.hce.modo === 'real' ? '<b>envío real</b> (POST de un Bundle transaction)' : 'envío simulado (no sale ningún pedido; configurable con HCE_ENVIO en .env)'}
         </div>
         ${vistaDatos ? `<pre class="json" id="bundleView" style="margin-top:10px">${esc(JSON.stringify(vistaDatos.data, null, 2))}</pre>` : ''}
       </div>

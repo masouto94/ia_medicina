@@ -17,6 +17,7 @@ const SIM = require('./src/simulacion');
 const T = require('./src/trazabilidad');
 const LOGS = require('./src/logs');
 const SEUD = require('./src/seudonimo');
+const HCE = require('./src/envioHce');
 const hce = require('./src/mocks/hce');
 const OE = require('./src/mocks/openevidence');
 const { seed14 } = require('./src/seed');
@@ -93,6 +94,7 @@ app.get('/api/catalog', (req, res) => {
     modulos: MOD.catalogo(),
     umbralesGenerales: MOD.UMBRALES_GENERALES,
     motivos: TERM.MOTIVOS,
+    hce: HCE.info(),
   });
 });
 
@@ -243,24 +245,43 @@ app.get('/api/trazas', (req, res) => {
 const resumenFhir = (b) => b.entry.reduce((m, e) => ({ ...m, [e.resource.resourceType]: (m[e.resource.resourceType] || 0) + 1 }), {});
 app.get('/api/fhir/resumen', (req, res) => {
   // cantidades por tipo de recurso, sin datos de la paciente (para la pestaña, sin generar accesos)
-  res.json({ recursos: resumenFhir(F.bundle()), exportaciones: S.get().exportaciones || [] });
+  res.json({ recursos: resumenFhir(F.bundle()), exportaciones: S.get().exportaciones || [], hce: HCE.info() });
 });
 app.get('/api/fhir/bundle', (req, res) => {
   const b = F.bundle(`${req.protocol}://${req.get('host')}`);
   T.auditar({ accion: 'R', evento: 'Bundle FHIR consultado', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Bundle FHIR de la paciente' }, detalle: `${b.entry.length} recursos vistos en el panel`, versionAntes: null, versionDespues: null });
   res.type('application/fhir+json').send(JSON.stringify(b, null, 2));
 });
-app.post('/api/hce/export', wrap(() => {
+app.post('/api/hce/export', wrap(async (req) => {
   needAssistant();
   const st = S.get();
-  const b = F.bundle();
-  const recursos = resumenFhir(b);
-  const exp = { id: uid('exp'), ts: st.clock, real: Date.now(), recursos, total: b.entry.length, destino: 'HCE institucional (mock FHIR)' };
+  const destino = HCE.info();
+  const tx = F.transaccion(`${req.protocol}://${req.get('host')}`);
+  const recursos = resumenFhir(tx);
+  let r = null;
+  let error = null;
+  try {
+    r = await HCE.enviar(tx);
+  } catch (e) {
+    error = e;
+  }
+  const exp = { id: uid('exp'), ts: st.clock, real: Date.now(), recursos, total: tx.entry.length, destino: destino.url, modo: destino.modo, estado: error ? 'error' : r.estado, aceptados: r ? r.aceptados : 0, rechazados: r ? r.rechazados : 0, error: error ? error.message : null };
   st.exportaciones = st.exportaciones || [];
   st.exportaciones.push(exp);
-  T.auditar({ accion: 'E', categoria: 'exportacion', evento: 'Bundle enviado a la HCE', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Registro de la paciente en la HCE' }, detalle: `POST ${exp.destino}: ${b.entry.length} recursos (${Object.entries(recursos).map(([k, v]) => `${v} ${k}`).join(', ')})`, versionAntes: null, versionDespues: null });
-  S.trace('Exportación a la HCE', [{ paso: 'HCE (mock FHIR)', detalle: `Bundle transaction con ${b.entry.length} recursos enviado a ${exp.destino}` }]);
+  const lista = Object.entries(recursos).map(([k, v]) => `${v} ${k}`).join(', ');
+  T.auditar({
+    accion: 'E',
+    categoria: 'exportacion',
+    resultado: error ? 'error' : 'ok',
+    evento: error ? 'Envío a la HCE fallido' : 'Bundle enviado a la HCE',
+    objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Registro de la paciente en la HCE' },
+    detalle: `POST ${destino.url} (${destino.modo === 'real' ? 'envío real' : 'envío simulado'}): Bundle transaction con ${tx.entry.length} recursos (${lista})${error ? ` · ERROR: ${error.message}` : r.http ? ` · HTTP ${r.http}, ${r.aceptados} aceptados` : ''}`,
+    versionAntes: null,
+    versionDespues: null,
+  });
+  S.trace(error ? 'Envío a la HCE fallido' : 'Exportación a la HCE', [{ paso: `HCE FHIR (${destino.modo})`, detalle: `POST ${destino.url} · Bundle transaction con ${tx.entry.length} recursos (PUT, idempotente)${error ? ` · ERROR: ${error.message}` : ''}` }]);
   S.save();
+  if (error) throw new Error(`No se pudo enviar a la HCE: ${error.message}`);
   return exp;
 }));
 app.get('/cds-services', (req, res) => res.json(F.DISCOVERY));

@@ -214,6 +214,7 @@ function auditar(e) {
     ts: st.clock,
     registrado: new Date().toISOString(),
     accion: e.accion,
+    resultado: e.resultado || 'ok', // ok | error (un intento fallido también se audita)
     categoria: e.categoria || (e.accion === 'R' ? 'consulta' : 'cambio'), // cambio | consulta | exportacion | decision (clínica)
     evento: e.evento,
     actor: actor(),
@@ -296,7 +297,7 @@ function aAuditEvent(r) {
     action: r.accion,
     period: { start: new Date(r.ts).toISOString() },
     recorded: r.registrado,
-    outcome: '0',
+    outcome: r.resultado === 'error' ? '8' : '0', // 0 = éxito · 8 = falla grave
     outcomeDesc: r.evento,
     agent: [
       {

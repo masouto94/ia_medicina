@@ -207,7 +207,7 @@ Los tests usan una carpeta de estado temporal y un puerto propio, así que no to
 | Filtro de seguridad clínica | **Real**: alarmas configurables que se evalúan *antes* del LLM (primera capa, determinística), más un doble control del modelo (segunda capa) con guardrails en `src/guardrails.js`: el modelo sólo puede proponer alarmas activas, fundamentadas en el mensaje, con fuentes de la configuración o del RAG, con umbrales verificados y sin consultar OpenEvidence. Aplica a mensajes y a fotos. Las genéricas están en `knowledge/alarmas_genericas.json`. Desde *Configuración → Alarmas* la médica puede pausarlas, modificarlas, agregar nuevas o eliminar las que no son genéricas. |
 | Base especializada por patología + RAG | **Real**: fragmentos DM2 y HTA en `knowledge/`, con recuperación tipo BM25. |
 | Transcripción de audio | **Real** en el navegador (Web Speech API; Chrome o Edge). |
-| HCE / servidor FHIR | **Mock** (`src/mocks/hce.js`) |
+| HCE / servidor FHIR | **Mock** para la importación (`src/mocks/hce.js`). El **envío** puede ser simulado (por defecto) o **real** a un servidor FHIR R4: ver [Envío a la HCE](#envío-a-la-hce). |
 | OpenEvidence API | **Mock** (`src/mocks/openevidence.js`): respuestas predefinidas con citas reales; la consulta se anonimiza antes de enviarse. |
 | WhatsApp Business | **Mock**: la interfaz simula el canal. |
 | Agenda de turnos | **Mock** (`src/mocks/agenda.js`) |
@@ -265,6 +265,27 @@ Envía un Bundle `batch` con `PUT <Tipo>/<id>`, así que correrlo dos veces no d
 Los archivos `.jsonl` y `.ndjson` también se pueden levantar directamente con un recolector de logs (Fluent Bit, Filebeat, Vector) o un SIEM, porque cada línea es un JSON completo. La carpeta se cambia con la variable `LOGS_DIR`; los tests usan una temporal.
 
 Los recursos se validaron estructuralmente contra FHIR R4 con la librería `fhir` de npm. No se pudo usar el validador oficial de HL7, porque necesita descargar paquetes de `packages.fhir.org` y ese sitio no estaba accesible durante el desarrollo.
+
+## Envío a la HCE
+
+**Enviar a la HCE** (pestaña *HCE · FHIR · CDS Hooks*) arma un Bundle FHIR R4 de tipo `transaction` y lo manda al servidor FHIR de la institución:
+
+- Cada recurso va como `PUT <Tipo>/<id>`. El servidor aplica todo o nada, y si se envía dos veces actualiza los mismos recursos en lugar de duplicarlos.
+- No se reenvía lo que vino de la HCE (paciente, médica, diagnósticos, medicación indicada): los recursos nuevos lo referencian.
+- Va el plan de cuidado y sus metas, las observaciones, las tomas, los archivos, las derivaciones, los turnos, el resumen preconsulta, las sugerencias de evidencia con la decisión de la médica, y la procedencia y auditoría de la sesión.
+- Cada envío queda auditado como exportación. Si el servidor lo rechaza o no responde, la app muestra el error, y el intento queda auditado como falla (`AuditEvent.outcome` = 8).
+
+Se configura en `.env`:
+
+| Variable | Para qué | Por defecto |
+|---|---|---|
+| `HCE_FHIR_URL` | URL base del servidor FHIR de la HCE (también la que se muestra al importar) | `https://hce.institucion.ar/fhir` (ficticia) |
+| `HCE_ENVIO` | `simulado`: no sale ningún pedido · `real`: hace el `POST` del Bundle a `HCE_FHIR_URL` | `simulado` |
+| `HCE_FHIR_TOKEN` | Token `Bearer` para el servidor, si lo pide | vacío |
+
+Para que el envío real funcione, la paciente tiene que existir en esa HCE con el mismo id (`marta-001`), porque los recursos la referencian. En producción, la autenticación sería SMART Backend Services (OAuth2 entre sistemas) en lugar de un token fijo. La importación de la HCE sigue simulada.
+
+**CDS Hooks va en el sentido contrario.** La HCE llama a la app (`POST /cds-services/seguimiento-entre-consultas`) cuando la médica abre la historia, y la app responde con tarjetas que la HCE muestra en pantalla. Nada de eso queda guardado en la historia.
 
 ## Origen de los códigos de terminología
 
@@ -333,6 +354,7 @@ src/terminologia.js    SNOMED CT y UCUM para el export
 src/trazabilidad.js    procedencia de cada respuesta y auditoría de cambios (Provenance / AuditEvent)
 src/logs.js            registro append-only en logs/ con hash encadenado
 src/seudonimo.js       seudónimo de la paciente y desidentificación de lo que va a logs/
+src/envioHce.js        envío del Bundle transaction a la HCE (simulado o real, según .env)
 scripts/inyectar_fhir.js  envía logs/fhir a un servidor FHIR (npm run logs:fhir)
 src/seed.js            14 días de datos de ejemplo
 src/configuracion.js   acciones de la médica: importar la HCE, generar el asistente, alarmas
