@@ -6,15 +6,19 @@ const M = require('./modulos');
 const TERM = require('./terminologia');
 const { fmtDateTime } = require('./util');
 const LOGS = require('./logs');
+const HCE = require('./envioHce');
 
 const P = { reference: `Patient/${hce.PATIENT_ID}`, display: 'Marta González' };
 const DR = { reference: `Practitioner/${hce.PRACTITIONER_ID}`, display: 'Dra. Lucía Fernández' };
 const iso = (ms) => new Date(ms).toISOString();
+// Un id FHIR sólo admite letras, dígitos, "-" y "." (hasta 64): "pa_sistolica" → "pa-sistolica"
+const idFhir = (s) => String(s).replace(/[^A-Za-z0-9.-]/g, '-').slice(0, 64);
 
 function bundle(baseUrl = 'http://localhost:3000') {
   const st = S.get();
   const entries = [];
-  const add = (r) => entries.push({ fullUrl: `urn:uuid:${r.resourceType.toLowerCase()}-${r.id}`, resource: r });
+  // fullUrl = la URL que el recurso tiene (o va a tener) en el servidor FHIR de la HCE
+  const add = (r) => entries.push({ fullUrl: `${HCE.URL_HCE}/${r.resourceType}/${r.id}`, resource: r });
   const src = hce.everything().entry.map((e) => e.resource);
   src.filter((r) => ['Patient', 'Practitioner', 'Condition', 'MedicationRequest'].includes(r.resourceType)).forEach(add);
 
@@ -27,7 +31,7 @@ function bundle(baseUrl = 'http://localhost:3000') {
       const porVar = {};
       for (const m of mc.metas) {
         if (!m.variable) {
-          goals.push({ id: `goal-${id}-${m.clave}`, text: `${m.etiqueta} ${cfg.metas[m.clave]} ${m.unidad}`.trim(), modulo: id });
+          goals.push({ id: idFhir(`goal-${id}-${m.clave}`), text: `${m.etiqueta} ${cfg.metas[m.clave]} ${m.unidad}`.trim(), modulo: id });
           continue;
         }
         porVar[m.variable] = porVar[m.variable] || { low: null, high: null };
@@ -36,7 +40,7 @@ function bundle(baseUrl = 'http://localhost:3000') {
       for (const [v, r] of Object.entries(porVar)) {
         const def = mc.variables[v] || {};
         const rango = r.low != null && r.high != null ? `${r.low}–${r.high}` : r.high != null ? `< ${r.high}` : `> ${r.low}`;
-        goals.push({ id: `goal-${id}-${v}`, text: `${def.etiqueta || v} ${rango} ${def.unidad || ''}`.trim(), loinc: def.loinc, low: r.low, high: r.high, unit: def.ucum || def.unidad, modulo: id });
+        goals.push({ id: idFhir(`goal-${id}-${v}`), text: `${def.etiqueta || v} ${rango} ${def.unidad || ''}`.trim(), loinc: def.loinc, low: r.low, high: r.high, unit: def.ucum || def.unidad, modulo: id });
       }
     }
     for (const g of goals) {
@@ -207,4 +211,21 @@ function cdsCards() {
   return { cards };
 }
 
-module.exports = { bundle, DISCOVERY, cdsCards };
+/**
+ * Bundle para cargar en la HCE: `transaction` con PUT <Tipo>/<id> (idempotente). No reenvía lo que vino de la
+ * HCE (paciente, médica, diagnósticos, medicación indicada): las referencias apuntan a esos recursos que ya existen.
+ */
+function transaccion(baseUrl) {
+  const b = bundle(baseUrl);
+  const origen = new Set(hce.everything().entry.map((e) => `${e.resource.resourceType}/${e.resource.id}`));
+  return {
+    resourceType: 'Bundle',
+    type: 'transaction',
+    timestamp: b.timestamp,
+    entry: b.entry
+      .filter((e) => !origen.has(`${e.resource.resourceType}/${e.resource.id}`))
+      .map((e) => ({ fullUrl: e.fullUrl, resource: e.resource, request: { method: 'PUT', url: `${e.resource.resourceType}/${e.resource.id}` } })),
+  };
+}
+
+module.exports = { bundle, transaccion, DISCOVERY, cdsCards, idFhir };

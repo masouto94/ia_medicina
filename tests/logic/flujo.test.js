@@ -50,7 +50,7 @@ test('modo simulado', async (t) => {
     const tipos = new Set(b.entry.map((e) => e.resource.resourceType));
     for (const t of ['Patient', 'CarePlan', 'Goal', 'Observation', 'Communication']) assert.ok(tipos.has(t), t);
     const goals = b.entry.filter((e) => e.resource.resourceType === 'Goal').map((e) => e.resource.id);
-    assert.ok(goals.includes('goal-dm2-glucemia') && goals.includes('goal-hta-pa_sistolica'), goals.join(', '));
+    assert.ok(goals.includes('goal-dm2-glucemia') && goals.includes('goal-hta-pa-sistolica'), goals.join(', '));
   });
 });
 
