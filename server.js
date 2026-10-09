@@ -202,11 +202,7 @@ app.post('/api/alert/:id/ack', wrap((req) => {
   if (a) a.ack = true;
   S.save();
 }));
-app.post('/api/suggestion/:id', wrap((req) => {
-  const s = S.get().suggestions.find((x) => x.id === req.params.id);
-  if (s) s.estado = req.body.estado === 'aceptada' ? 'aceptada' : 'descartada';
-  S.save();
-}));
+app.post('/api/suggestion/:id', wrap((req) => CFG.resolverSugerencia(req.params.id, String(req.body.estado || ''))));
 app.post('/api/summary', wrap(async () => { needAssistant(); return A.preconsultaSummary(); }));
 app.post('/api/evidence', wrap((req) => {
   const q = String(req.body.pregunta || '').trim();

@@ -124,6 +124,36 @@ function bundle(baseUrl = 'http://localhost:3000') {
     add({ resourceType: 'Communication', id: r.id, status: r.estado === 'pendiente' ? 'in-progress' : 'completed', category: [{ text: 'Derivación del asistente a la médica' }], priority: r.prioridad === 'alta' ? 'urgent' : 'routine', subject: P, sent: iso(r.ts), sender: { display: 'lucia-marta-assistant' }, recipient: [DR], reasonCode: [TERM.concepto(r.codigo || TERM.motivo('consulta'), r.motivo)], payload: [{ contentString: r.resumen }] });
     if (r.respuesta) add({ resourceType: 'Communication', id: `${r.id}-resp`, status: 'completed', inResponseTo: [{ reference: `Communication/${r.id}` }], subject: P, sent: iso(r.respondida), sender: DR, recipient: [P], payload: [{ contentString: r.respuesta }] });
   }
+  // Sugerencias basadas en evidencia: lo que devolvió OpenEvidence (GuidanceResponse) y la decisión de la médica (Task)
+  const ESTADO_TASK = { pendiente: 'requested', aceptada: 'accepted', descartada: 'rejected' };
+  const NEGOCIO = { pendiente: 'Pendiente de revisión', aceptada: 'Evaluar en consulta', descartada: 'Descartada' };
+  for (const s of st.suggestions || []) {
+    add({
+      resourceType: 'GuidanceResponse',
+      id: `${s.id}-evidencia`,
+      moduleUri: 'urn:asistente:openevidence-mock',
+      status: 'success',
+      subject: P,
+      occurrenceDateTime: iso(s.ts),
+      performer: { display: s.origen },
+      reasonCode: [{ text: 'Consulta de la paciente que implica una posible decisión terapéutica' }],
+      note: [{ text: `${s.tema}. ${s.texto}` }, ...s.citas.map((c) => ({ text: `${c.ref}${c.url ? ` ${c.url}` : ''}` }))],
+    });
+    add({
+      resourceType: 'Task',
+      id: s.id,
+      status: ESTADO_TASK[s.estado] || 'requested',
+      businessStatus: { text: NEGOCIO[s.estado] || s.estado },
+      intent: 'proposal',
+      code: { text: 'Revisar sugerencia basada en evidencia' },
+      description: s.tema,
+      focus: { reference: `GuidanceResponse/${s.id}-evidencia` },
+      for: P,
+      authoredOn: iso(s.ts),
+      ...(s.resuelta ? { lastModified: iso(s.resuelta), executionPeriod: { end: iso(s.resuelta) } } : {}),
+      owner: DR,
+    });
+  }
   for (const a of st.appointments) {
     add({ resourceType: 'Appointment', id: a.id, status: 'booked', start: iso(a.inicio), end: iso(a.inicio + 20 * 60e3), created: iso(a.ts), participant: [{ actor: P, status: 'accepted' }, { actor: DR, status: 'accepted' }], description: `Turno solicitado por el asistente – ${a.lugar}` });
   }

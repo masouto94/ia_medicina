@@ -131,4 +131,34 @@ function generarDatosEjemplo(seed14) {
   T.auditar({ accion: 'E', evento: 'Datos de ejemplo generados', objeto: { tipo: 'demo', id: st.sesion, nombre: 'Escenario fijo de 14 días' }, detalle: `${st.messages.length} mensajes y ${st.observations.length} observaciones sintéticas`, versionAntes: null, versionDespues: null });
 }
 
-module.exports = { reiniciarDemo, importarHCE, guardarAsistente, agregarAlarma, modificarAlarma, eliminarAlarma, generarDatosEjemplo };
+// ---------------- Sugerencias basadas en evidencia ----------------
+const DECISIONES = { aceptada: 'aceptada para evaluar en consulta', descartada: 'descartada' };
+
+/** La médica resuelve una sugerencia de evidencia: queda registrada (quién, cuándo, antes → después). */
+function resolverSugerencia(id, estado) {
+  const st = S.get();
+  const s = (st.suggestions || []).find((x) => x.id === id);
+  if (!s) throw new Error('Sugerencia no encontrada');
+  if (!DECISIONES[estado]) throw new Error('La decisión tiene que ser "aceptada" o "descartada"');
+  if (s.estado !== 'pendiente') throw new Error(`La sugerencia ya fue ${DECISIONES[s.estado] || s.estado}`);
+  const quien = T.actor();
+  s.estado = estado;
+  s.resuelta = st.clock;
+  s.resueltaPor = { id: quien.id, nombre: quien.nombre };
+  T.auditar({
+    accion: 'U',
+    categoria: 'decision',
+    evento: `Sugerencia de evidencia ${DECISIONES[estado]}`,
+    objeto: { tipo: 'sugerencia', id: s.id, nombre: s.tema },
+    antes: { estado: 'pendiente' },
+    despues: { estado },
+    detalle: `${s.origen}: ${s.tema}`,
+    versionAntes: null,
+    versionDespues: null,
+  });
+  S.trace(`Sugerencia de evidencia ${DECISIONES[estado]}`, [{ paso: 'Panel médico – evidencia', detalle: `${s.tema}: pendiente → ${estado} (${quien.nombre})` }]);
+  S.save();
+  return s;
+}
+
+module.exports = { resolverSugerencia, reiniciarDemo, importarHCE, guardarAsistente, agregarAlarma, modificarAlarma, eliminarAlarma, generarDatosEjemplo };

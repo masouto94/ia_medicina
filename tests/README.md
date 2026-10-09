@@ -33,6 +33,7 @@ tests/
 │   ├── modulos.test.js       módulos = conocimiento + configuración
 │   ├── flujo.test.js         recorrido completo por la API (modo simulado y Claude falso)
 │   ├── simulacion.test.js    simulación con plan: validación, métricas, planes de ejemplo, bloqueo y cancelación
+│   ├── sugerencias.test.js   decisión sobre sugerencias de evidencia: auditoría y export FHIR (GuidanceResponse + Task)
 │   ├── trazabilidad.test.js  auditoría (quién, cuándo, antes/después), procedencia, integridad de logs/, export e inyección FHIR
 │   └── fhir.test.js          export FHIR: SNOMED CT en motivos y medicación, UCUM en unidades
 ├── generative/

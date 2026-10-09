@@ -448,7 +448,7 @@ function renderPanel() {
           <div class="meta">Disparada por: “${esc(s.pregunta)}” · ${fDT(s.ts)}</div>
           <div style="margin-top:4px">${esc(s.texto)}</div>
           <ol class="cites">${s.citas.map((c) => `<li>${esc(c.ref)} ${c.url ? `<a href="${c.url}" target="_blank">↗</a>` : ''}</li>`).join('')}</ol>
-          ${s.estado === 'pendiente' ? `<div class="reply"><button class="btn sm" data-sug="${s.id}" data-est="aceptada">Evaluar en consulta</button><button class="btn sm" data-sug="${s.id}" data-est="descartada">Descartar</button></div>` : `<div class="meta">Estado: ${s.estado}</div>`}
+          ${s.estado === 'pendiente' ? `<div class="reply"><button class="btn sm" data-sug="${s.id}" data-est="aceptada">Evaluar en consulta</button><button class="btn sm" data-sug="${s.id}" data-est="descartada">Descartar</button></div>` : `<div class="meta">${s.estado === 'aceptada' ? 'Para evaluar en consulta' : 'Descartada'}${s.resuelta ? ` · ${fDT(s.resuelta)}` : ''}${s.resueltaPor ? ` · ${esc(s.resueltaPor.nombre)}` : ''} <span class="muted">(queda en la auditoría y en la HCE)</span></div>`}
           <div class="small muted" style="margin-top:6px">La paciente no recibe esta sugerencia: sólo la médica decide cambios de tratamiento.</div>
         </div>
       </div>`).join('')
@@ -617,6 +617,7 @@ function renderFhir() {
     ['Consultas relevantes y derivaciones', ['Communication']],
     ['Turnos', ['Appointment']],
     ['Resumen del período', ['Composition']],
+    ['Sugerencias de evidencia y decisión de la médica', ['GuidanceResponse', 'Task']],
     ['Trazabilidad y auditoría de la sesión', ['Provenance', 'AuditEvent']],
   ];
   setHTML('tab-fhir', `
@@ -1100,7 +1101,7 @@ function renderAuditoria(forzar = false) {
       (r) => `<tr>
       <td class="small">${fDT(r.ts)}<div class="muted" title="Fecha y hora reales del registro (el reloj de arriba es el simulado)">registrado ${esc(new Date(r.registrado).toLocaleString('es-AR', { hour12: false, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</div></td>
       <td class="small">${esc(r.actor.nombre)}<div class="muted">${esc(r.actor.origen || '')}</div></td>
-      <td class="small"><span class="pill ${r.categoria === 'exportacion' ? 'bad' : ''}">${r.categoria === 'exportacion' ? 'Exportación' : ACCION[r.accion] || r.accion}</span><div>${esc(r.evento)}</div></td>
+      <td class="small"><span class="pill ${r.categoria === 'exportacion' ? 'bad' : ''}">${r.categoria === 'exportacion' ? 'Exportación' : r.categoria === 'decision' ? 'Decisión clínica' : ACCION[r.accion] || r.accion}</span><div>${esc(r.evento)}</div></td>
       <td class="small">${esc(r.objeto.nombre || r.objeto.id)}<div class="muted">${esc(r.objeto.tipo)} · ${esc(r.objeto.id)}</div></td>
       <td>${cambiosHtml(r)}</td>
       <td class="small num">${r.configuracion.versionAntes != null || r.configuracion.versionDespues != null ? `v${r.configuracion.versionAntes ?? '—'} → v${r.configuracion.versionDespues ?? '—'}` : '—'}</td>

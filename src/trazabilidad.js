@@ -214,7 +214,7 @@ function auditar(e) {
     ts: st.clock,
     registrado: new Date().toISOString(),
     accion: e.accion,
-    categoria: e.categoria || (e.accion === 'R' ? 'consulta' : 'cambio'), // cambio | consulta | exportacion
+    categoria: e.categoria || (e.accion === 'R' ? 'consulta' : 'cambio'), // cambio | consulta | exportacion | decision (clínica)
     evento: e.evento,
     actor: actor(),
     objeto: e.objeto,

@@ -72,7 +72,7 @@ El asistente **no diagnostica, no cambia medicación y no reemplaza la consulta*
    - Gráfico de glucemias y grilla de tomas por día.
    - **Alertas** (valores fuera de rango, tomas omitidas): se marcan como vistas.
    - **Derivaciones:** las consultas que el asistente le pasó, con un resumen y, si corresponde, la foto. Se responden desde ahí y la respuesta le llega a la paciente.
-   - **Sugerencias basadas en evidencia:** cuando una consulta implica un posible cambio de tratamiento, la evidencia llega sólo a la médica, nunca a la paciente.
+   - **Sugerencias basadas en evidencia:** cuando una consulta implica un posible cambio de tratamiento, la evidencia llega sólo a la médica, nunca a la paciente. La médica la marca para **Evaluar en consulta** o la **descarta**. La decisión queda en la auditoría (quién y cuándo) y se exporta a la HCE.
    - **Resumen preconsulta:** un resumen del período para leer antes de la próxima visita.
 5. **Evidencia.** Consultar literatura médica sobre el caso (OpenEvidence, simulado).
 6. **HCE · FHIR · CDS Hooks.** **Enviar a la HCE** todo lo registrado en formato FHIR, ver el Bundle o los datos de origen en pantalla, y ver cómo aparecerían las alertas dentro de la historia clínica al abrir el registro de la paciente. Los datos de la paciente **no se descargan a archivos**: salen del sistema sólo hacia la HCE, y cada envío y cada vista quedan en la auditoría.
@@ -80,6 +80,7 @@ El asistente **no diagnostica, no cambia medicación y no reemplaza la consulta*
 8. **Auditoría.** El registro que pide un software de uso médico:
    - **Cambios de configuración:** quién hizo cada cambio, cuándo, y el valor antes y después. Incluye pausar, modificar, agregar o eliminar alarmas, cambios del formulario, importar la HCE y reiniciar la demo.
    - **Consultas y exportaciones:** cada vez que alguien ve el Bundle, los datos de origen de la HCE o la consulta CDS Hooks, y cada envío a la HCE.
+   - **Decisiones clínicas:** aceptar o descartar una sugerencia basada en evidencia.
    - **Origen de las respuestas:** para cada respuesta del asistente, qué modelo y qué plantilla de prompt la generaron, las versiones de los módulos, la versión de la configuración de la médica y los fragmentos del RAG que intervinieron. Incluye la decisión de los guardrails y si se consultó evidencia.
    - **Integridad:** un indicador verde confirma que nadie modificó ni borró registros.
    - **Paciente en los logs:** el seudónimo con el que figura la paciente (ver *Trazabilidad y auditoría* más abajo).
@@ -210,7 +211,7 @@ Los tests usan una carpeta de estado temporal y un puerto propio, así que no to
 | OpenEvidence API | **Mock** (`src/mocks/openevidence.js`): respuestas predefinidas con citas reales; la consulta se anonimiza antes de enviarse. |
 | WhatsApp Business | **Mock**: la interfaz simula el canal. |
 | Agenda de turnos | **Mock** (`src/mocks/agenda.js`) |
-| Exportación FHIR R4 y servicio CDS Hooks | **Real**: `GET /api/fhir/bundle`, `GET /cds-services`, `POST /cds-services/seguimiento-entre-consultas`. Terminologías: SNOMED CT en diagnósticos, medicación (también en `MedicationStatement`) y motivos de derivación (`Communication.reasonCode`); LOINC en observaciones; UCUM en todas las unidades. Los códigos están en `knowledge/terminologia.json` y en cada alarma; ver [Origen de los códigos](#origen-de-los-códigos-de-terminología). |
+| Exportación FHIR R4 y servicio CDS Hooks | **Real**: `GET /api/fhir/bundle`, `GET /cds-services`, `POST /cds-services/seguimiento-entre-consultas`. Terminologías: SNOMED CT en diagnósticos, medicación (también en `MedicationStatement`) y motivos de derivación (`Communication.reasonCode`); LOINC en observaciones; UCUM en todas las unidades. Las sugerencias basadas en evidencia van como `GuidanceResponse` (lo que devolvió OpenEvidence) y `Task` (la decisión de la médica: `requested`, `accepted` o `rejected`). Los códigos están en `knowledge/terminologia.json` y en cada alarma; ver [Origen de los códigos](#origen-de-los-códigos-de-terminología). |
 
 Si el indicador del motor dice "Modo simulado", al pasar el mouse por encima se ve el motivo.
 
@@ -248,7 +249,7 @@ logs/
 - **Nada se descarga desde la app.** Los datos identificados se ven en pantalla, y cada vista queda auditada. Salen del sistema sólo con **Enviar a la HCE**, que queda auditado como exportación (`AuditEvent` tipo DICOM 110106 *Export*). Los logs salen sólo con el script de inyección.
 - **FHIR.**
   - `Provenance`: el *target* es la respuesta (un `Communication`) o el resumen preconsulta (un `Composition`). Los *agents* son el software (author), el modelo (assembler) y los guardrails (verifier). Las *entities* son el mensaje de la paciente, la configuración, los módulos, los fragmentos (los citados con rol `quotation`) y la plantilla del prompt.
-  - `AuditEvent`: tipo `rest` con subtipo `create`, `read`, `update`, `delete` u `operation`; un envío a la HCE es tipo DICOM `110106` *Export*. El valor anterior, el nuevo y los cambios campo por campo van en `entity.detail`. La paciente figura sólo con su seudónimo.
+  - `AuditEvent`: tipo `rest` con subtipo `create`, `read`, `update`, `delete` u `operation`; un envío a la HCE es tipo DICOM `110106` *Export*; la decisión sobre una sugerencia de evidencia es un `update` con categoría *decisión clínica*. El valor anterior, el nuevo y los cambios campo por campo van en `entity.detail`. La paciente figura sólo con su seudónimo.
   - Las referencias son lógicas (por identificador `urn:asistente:*`), así que se pueden cargar en cualquier servidor FHIR sin que existan la paciente o la médica. También se incluyen en el Bundle de *Exportar a la HCE*, filtrados por la sesión actual.
 
 **Inyectar los logs en otro sistema:**
