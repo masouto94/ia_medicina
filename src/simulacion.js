@@ -12,6 +12,7 @@ const V = require('./vision');
 const CFG = require('./configuracion');
 const MOD = require('./modulos');
 const llm = require('./llm');
+const T = require('./trazabilidad');
 const { validarEsperado, obtener, comparar, metricas, parseMomento, CAMPOS_ESPERADO } = require('./evaluacion');
 
 
@@ -63,7 +64,7 @@ function snapshot() {
 }
 
 async function prepararAsistente(conf = {}) {
-  S.reset();
+  CFG.reiniciarDemo();
   CFG.importarHCE();
   const cfg = A.defaultConfig(S.get().hce);
   if (conf.modulos) cfg.modulos = conf.modulos;
@@ -126,14 +127,18 @@ function iniciar(contenido, nombreArchivo = 'plan') {
   const total = planes.reduce((n, p) => n + p.pasos.length, 0);
   actual = { id: `sim-${Date.now()}`, estado: 'corriendo', nombre: nombreArchivo, planes: planes.map((p) => p.nombre || 'plan sin nombre'), total, hechos: 0, resultados: [], metricas: null, motor: llm.status().model || 'simulado (sin IA)', inicio: Date.now(), fin: null, error: null, cancelar: false };
   const job = actual;
-  ejecutarPlanes(planes, {
+  T.auditar({ accion: 'E', evento: 'Simulación con plan iniciada', objeto: { tipo: 'simulacion', id: job.id, nombre: job.nombre }, detalle: `${planes.length} plan(es), ${total} pasos: ${job.planes.join(' · ')}`, versionAntes: null, versionDespues: null });
+  // los cambios que hace la simulación quedan a nombre de la simulación (iniciada por quien la lanzó)
+  const quien = T.actor();
+  const actorSim = { tipo: 'sistema', id: `simulacion:${job.id}`, nombre: `Simulación con plan "${job.nombre}"`, rol: 'sistema', origen: `Simular → plan JSON (iniciada por ${quien.nombre})`, iniciadoPor: quien.id };
+  T.conActor(actorSim, () => ejecutarPlanes(planes, {
     onPaso: (r, hechos) => {
       job.resultados.push(r);
       job.hechos = hechos;
       job.metricas = metricas(job.resultados);
     },
     cancelado: () => job.cancelar,
-  })
+  }))
     .then(() => {
       job.estado = job.cancelar ? 'cancelada' : 'terminada';
     })

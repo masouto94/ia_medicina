@@ -2,6 +2,7 @@
 const S = require('./state');
 const M = require('./modulos');
 const { uid, atLocalTime, localDayKey, fmtTime } = require('./util');
+const T = require('./trazabilidad');
 
 const LOINC = {
   glucemia: { code: '2339-0', display: 'Glucemia (capilar)' },
@@ -21,6 +22,7 @@ function addMessage(m) {
   const st = S.get();
   const msg = { id: uid('msg'), ts: st.clock, ...m };
   st.messages.push(msg);
+  T.anotar('mensajes', msg);
   return msg;
 }
 
@@ -29,6 +31,7 @@ function addObservation(o, { check = true } = {}) {
   const obs = { id: uid('obs'), ts: st.clock, ...o };
   obs.loinc = obs.loinc || (LOINC[obs.tipo] && LOINC[obs.tipo].code);
   st.observations.push(obs);
+  T.anotar('observaciones', obs);
   if (check) checkThresholds(obs);
   return obs;
 }
@@ -37,6 +40,7 @@ function addAlert(nivel, motivo, extra = {}) {
   const st = S.get();
   const a = { id: uid('alr'), ts: st.clock, nivel, motivo, ack: false, ...extra };
   st.alerts.push(a);
+  T.anotar('alertas', a);
   return a;
 }
 
@@ -44,6 +48,7 @@ function addReferral(r) {
   const st = S.get();
   const ref = { id: uid('der'), ts: st.clock, estado: 'pendiente', prioridad: 'media', ...r };
   st.referrals.push(ref);
+  T.anotar('derivaciones', ref);
   return ref;
 }
 

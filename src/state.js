@@ -1,5 +1,6 @@
 // Estado de la simulación (en memoria, persistido en data/state.json)
 const fs = require('fs');
+const crypto = require('crypto');
 const path = require('path');
 
 // DATA_DIR permite aislar el estado (por ejemplo, en los tests) sin tocar data/
@@ -14,6 +15,7 @@ const INICIO = Date.parse('2026-10-05T10:00:00-03:00');
 function fresh() {
   return {
     version: 1,
+    sesion: `ses-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`, // cada reinicio de la demo es una sesión nueva (los logs la registran)
     clock: INICIO,
     hce: null, // resumen importado desde la HCE
     assistant: null, // configuración generada por la médica

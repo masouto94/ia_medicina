@@ -21,6 +21,7 @@ let provider = null; // 'claude-code' | 'api' | null
 let detail = '';
 let lastError = null;
 let client = null;
+let cliVersion = null; // versión del CLI de Claude Code (para la trazabilidad)
 
 // ---------------- Detección ----------------
 async function init() {
@@ -33,6 +34,7 @@ async function init() {
     const st = await cliAuthStatus();
     if (st.ok) {
       provider = 'claude-code';
+      cliVersion = st.version || null;
       detail = `Claude Code ${st.version || ''} · sesión: ${st.authMethod || 'suscripción'}`;
       return status();
     }
@@ -143,7 +145,11 @@ async function cliCall({ system, messages, schema }) {
       throw new Error(`Claude Code no respondió correctamente (código ${r.code}): ${(r.err || r.out).trim().slice(0, 200)}`);
     }
     if (res.is_error) throw new Error(`Claude Code: ${String(res.result || res.subtype).slice(0, 200)}`);
-    return { text: String(res.result || ''), usage: res.usage };
+    // Claude Code puede usar más de un modelo en una llamada (por ejemplo, uno chico para tareas internas):
+    // se registran todos y como modelo principal el que corresponde al alias pedido (o el que más generó)
+    const modelos = Object.entries(res.modelUsage || {}).map(([id, u]) => ({ id, entrada: (u.inputTokens || 0) + (u.cacheReadInputTokens || 0) + (u.cacheCreationInputTokens || 0), salida: u.outputTokens || 0 }));
+    const principal = modelos.find((m) => m.id.includes(CLI_MODEL)) || [...modelos].sort((a, b) => b.salida - a.salida)[0];
+    return { text: String(res.result || ''), usage: res.usage, modeloId: principal ? principal.id : null, modelos };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -163,37 +169,81 @@ function parseJson(text) {
  * Salida estructurada (JSON) que respeta el esquema de la "herramienta".
  * @param {{system:string, messages:Array, tool:{name, description, input_schema}}} p
  */
-async function structured({ system, messages, tool, maxTokens = 1500 }) {
-  const t0 = Date.now();
-  if (provider === 'claude-code') {
-    const r = await cliCall({ system, messages, schema: tool.input_schema });
-    return { data: parseJson(r.text), ms: Date.now() - t0, usage: r.usage };
-  }
-  const res = await client.messages.create({
-    model: API_MODEL,
-    max_tokens: maxTokens,
-    system,
-    messages,
-    tools: [tool],
-    tool_choice: { type: 'tool', name: tool.name },
+// Anota cada llamada en la interacción en curso (trazabilidad): modelo exacto, prompt (huella) y consumo
+function anotarLlamada({ funcion, plantilla, system, schema, t0, r, error }) {
+  const T = require('./trazabilidad');
+  T.anotar('llamadas', {
+    funcion: funcion || 'general',
+    proveedor: provider === 'claude-code' ? 'Claude Code' : provider === 'api' ? 'API de Anthropic' : 'ninguno',
+    alias: provider === 'claude-code' ? CLI_MODEL : API_MODEL,
+    modeloId: r ? r.modeloId || null : null,
+    cli: provider === 'claude-code' ? cliVersion : null,
+    plantilla: plantilla || null,
+    instancia: T.sha(`${system}\n${schema ? JSON.stringify(schema) : ''}`),
+    ms: Date.now() - t0,
+    // entrada incluye los tokens leídos o escritos en caché (el prompt completo que vio el modelo)
+    tokens: r && r.usage ? { entrada: (r.usage.input_tokens || 0) + (r.usage.cache_read_input_tokens || 0) + (r.usage.cache_creation_input_tokens || 0), salida: r.usage.output_tokens ?? null } : null,
+    ...(r && r.modelos && r.modelos.length > 1 ? { otrosModelos: r.modelos.filter((m) => m.id !== r.modeloId) } : {}),
+    ...(error ? { error: String(error.message || error).slice(0, 200) } : {}),
   });
-  const block = res.content.find((b) => b.type === 'tool_use');
-  if (!block) throw new Error('El modelo no devolvió una salida estructurada');
-  return { data: block.input, ms: Date.now() - t0, usage: res.usage };
 }
 
-async function text({ system, messages, maxTokens = 1200 }) {
+/**
+ * Salida estructurada (JSON) que respeta el esquema de la "herramienta".
+ * @param {{system:string, messages:Array, tool:{name, description, input_schema}, funcion?:string, plantilla?:string}} p
+ */
+async function structured({ system, messages, tool, maxTokens = 1500, funcion, plantilla }) {
   const t0 = Date.now();
-  if (provider === 'claude-code') {
-    const r = await cliCall({ system, messages });
-    return { data: r.text.trim(), ms: Date.now() - t0, usage: r.usage };
+  let r;
+  try {
+    if (provider === 'claude-code') {
+      r = await cliCall({ system, messages, schema: tool.input_schema });
+      r.data = parseJson(r.text);
+    } else {
+      const res = await client.messages.create({
+        model: API_MODEL,
+        max_tokens: maxTokens,
+        system,
+        messages,
+        tools: [tool],
+        tool_choice: { type: 'tool', name: tool.name },
+      });
+      const block = res.content.find((b) => b.type === 'tool_use');
+      if (!block) throw new Error('El modelo no devolvió una salida estructurada');
+      r = { data: block.input, usage: res.usage, modeloId: res.model };
+    }
+  } catch (e) {
+    anotarLlamada({ funcion, plantilla, system, schema: tool.input_schema, t0, r, error: e });
+    throw e;
   }
-  const res = await client.messages.create({ model: API_MODEL, max_tokens: maxTokens, system, messages });
-  const out = res.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n');
-  return { data: out, ms: Date.now() - t0, usage: res.usage };
+  anotarLlamada({ funcion, plantilla, system, schema: tool.input_schema, t0, r });
+  return { data: r.data, ms: Date.now() - t0, usage: r.usage, modelo: r.modeloId };
+}
+
+async function text({ system, messages, maxTokens = 1200, funcion, plantilla }) {
+  const t0 = Date.now();
+  let r;
+  try {
+    if (provider === 'claude-code') {
+      r = await cliCall({ system, messages });
+      r.data = r.text.trim();
+    } else {
+      const res = await client.messages.create({ model: API_MODEL, max_tokens: maxTokens, system, messages });
+      r = {
+        data: res.content
+          .filter((b) => b.type === 'text')
+          .map((b) => b.text)
+          .join('\n'),
+        usage: res.usage,
+        modeloId: res.model,
+      };
+    }
+  } catch (e) {
+    anotarLlamada({ funcion, plantilla, system, t0, r, error: e });
+    throw e;
+  }
+  anotarLlamada({ funcion, plantilla, system, t0, r });
+  return { data: r.data, ms: Date.now() - t0, usage: r.usage, modelo: r.modeloId };
 }
 
 function label() {

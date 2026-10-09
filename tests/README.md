@@ -4,7 +4,7 @@ Hay dos suites:
 
 | Suite | Comando | Usa LLM | Duración | Determinística |
 |---|---|---|---|---|
-| **logic** | `npm test logic` | No | ~5 s | Sí: si falla, hay un error |
+| **logic** | `npm test logic` | No | ~10 s | Sí: si falla, hay un error |
 | **generative** | `npm test generative` | Sí (Claude real) | ~3–5 min | No: el modelo puede variar entre corridas |
 
 `npm test` sin argumento corre `logic`.
@@ -33,6 +33,7 @@ tests/
 │   ├── modulos.test.js       módulos = conocimiento + configuración
 │   ├── flujo.test.js         recorrido completo por la API (modo simulado y Claude falso)
 │   ├── simulacion.test.js    simulación con plan: validación, métricas, planes de ejemplo, bloqueo y cancelación
+│   ├── trazabilidad.test.js  auditoría (quién, cuándo, antes/después), procedencia, integridad de logs/, export e inyección FHIR
 │   └── fhir.test.js          export FHIR: SNOMED CT en motivos y medicación, UCUM en unidades
 ├── generative/
 │   ├── casos.json            casos clínicos con resultado esperado
@@ -42,7 +43,7 @@ tests/
 
 Los planes de los tests usan **el mismo formato y la misma comparación** que *Simular → Ejecutar un plan JSON…* de la app: la lógica está en `src/evaluacion.js` (obtenido vs. esperado y métricas) y `src/simulacion.js` (validación y ejecución). Un plan que se prueba en la app se puede pegar tal cual en `casos.json`, y al revés. Los planes de ejemplo de la app están en `muestras/planes/`.
 
-Los tests **no tocan la demo**: cada servidor de prueba usa una carpeta temporal (`DATA_DIR`) y un puerto al azar, y se borra al terminar.
+Los tests **no tocan la demo**: cada servidor de prueba usa una carpeta temporal (`DATA_DIR`, y `LOGS_DIR` adentro) y un puerto al azar, y se borra al terminar. `iniciar()` devuelve también `logsDir`, por si un test necesita leer o alterar los logs.
 
 ---
 

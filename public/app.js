@@ -84,6 +84,7 @@ function render() {
   renderTraces();
   renderAlarmas();
   renderSim();
+  renderAuditoria();
   renderChat();
 }
 
@@ -680,7 +681,8 @@ function renderChat() {
 }
 
 function bubble(m) {
-  const time = `<div class="time">${fT(m.ts)}${m.from === 'marta' ? ' ✓✓' : ''}</div>`;
+  const prov = m.procedencia ? ` · <a class="provlink" data-prov="${m.procedencia}" title="Ver la procedencia de esta respuesta (modelo, versiones y fragmentos usados)">procedencia</a>` : '';
+  const time = `<div class="time">${fT(m.ts)}${m.from === 'marta' ? ' ✓✓' : ''}${prov}</div>`;
   if (m.from === 'marta') {
     let body = '';
     if (m.kind === 'image' && m.attachment) body += `<a href="${m.attachment.url}" target="_blank"><img src="${m.attachment.url}" alt="${esc(m.attachment.nombre)}"></a>`;
@@ -1015,6 +1017,120 @@ async function ejecutarPlan() {
   await refresh();
 }
 
+
+// ================= Auditoría (trazabilidad SaMD) =================
+let AUD = null; // respuesta de /api/auditoria
+let audAlcance = 'sesion';
+let audCargando = false;
+let audResaltar = null;
+const ACCION = { C: 'Alta', U: 'Modificación', D: 'Baja', E: 'Acción' };
+const corto = (v) => {
+  const s = typeof v === 'string' ? v : JSON.stringify(v);
+  return s == null ? '—' : s.length > 90 ? `${s.slice(0, 87)}…` : s;
+};
+
+async function cargarAuditoria() {
+  if (audCargando) return;
+  audCargando = true;
+  try {
+    AUD = await api(`/api/auditoria?alcance=${audAlcance}`);
+  } catch {
+    AUD = null;
+  }
+  audCargando = false;
+  renderAuditoria(true);
+}
+
+function cambiosHtml(r) {
+  if (r.accion === 'C' && r.despues) return `<div class="kv">creado: ${esc(corto(r.despues.nombre || r.objeto.nombre || r.objeto.id))}</div>`;
+  if (r.accion === 'D') return `<div class="kv">eliminado (antes: ${esc(corto(r.antes))})</div>`;
+  if (!r.cambios.length) return `<span class="small muted">${esc(r.detalle || '—')}</span>`;
+  return r.cambios.map((c) => `<div class="kv"><b>${esc(c.campo)}:</b> <span class="antes">${esc(corto(c.antes))}</span> → <span class="despues">${esc(corto(c.despues))}</span></div>`).join('');
+}
+
+function renderAuditoria(forzar = false) {
+  if (currentTab !== 'auditoria') return;
+  if (!forzar) return cargarAuditoria();
+  if (!AUD) return setHTML('tab-auditoria', '<div class="empty">Cargando la auditoría…</div>');
+  const msgs = new Map(S.messages.map((m) => [m.id, m]));
+  const integ = (n, i) => `<span class="pill ${i.ok ? 'ok' : 'bad'}" title="${esc(i.error || 'Cadena de hashes verificada')}">${i.ok ? '✓' : '✗'} ${n}: ${i.registros} registros${i.ok ? '' : ` · línea ${i.linea}: ${esc(i.error)}`}</span>`;
+  const v = AUD.versiones;
+  const descargas = ['auditoria.jsonl', 'procedencia.jsonl', 'AuditEvent.ndjson', 'Provenance.ndjson'].map((f) => `<a class="btn sm" href="/api/logs/${f}" download>${f}</a>`).join('');
+  const filasAud = AUD.auditoria
+    .map(
+      (r) => `<tr>
+      <td class="small">${fDT(r.ts)}<div class="muted" title="Fecha y hora reales del registro (el reloj de arriba es el simulado)">registrado ${esc(new Date(r.registrado).toLocaleString('es-AR', { hour12: false, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</div></td>
+      <td class="small">${esc(r.actor.nombre)}<div class="muted">${esc(r.actor.origen || '')}</div></td>
+      <td class="small"><span class="pill">${ACCION[r.accion] || r.accion}</span><div>${esc(r.evento)}</div></td>
+      <td class="small">${esc(r.objeto.nombre || r.objeto.id)}<div class="muted">${esc(r.objeto.tipo)} · ${esc(r.objeto.id)}</div></td>
+      <td>${cambiosHtml(r)}</td>
+      <td class="small num">${r.configuracion.versionAntes != null || r.configuracion.versionDespues != null ? `v${r.configuracion.versionAntes ?? '—'} → v${r.configuracion.versionDespues ?? '—'}` : '—'}</td>
+    </tr>`,
+    )
+    .join('');
+  const filasProv = AUD.procedencia
+    .map((p) => {
+      const entrada = p.entrada && msgs.get(p.entrada.id);
+      const d = p.decision;
+      const pills = [
+        d.intencion ? `<span class="tag i-${d.intencion}">${INTENT_LABEL[d.intencion] || d.intencion}</span>` : '',
+        d.alarma ? `<span class="tag i-alarma">alarma · ${d.origenAlarma}</span>` : '',
+        d.derivacion ? `<span class="tag i-derivacion">derivación ${d.derivacion}</span>` : '',
+        d.guardrails.length ? `<span class="tag">guardrails: ${d.guardrails.map((g) => (g.aceptada ? 'aceptada' : `rechazada (${g.fallidos.join(', ')})`)).join(', ')}</span>` : '',
+        d.evidencia.length ? `<span class="tag">evidencia → ${esc(d.evidencia.map((e) => e.destino).join(', '))}</span>` : '',
+      ].join('');
+      const modelos = p.modelo.llamadas.length
+        ? p.modelo.llamadas.map((l) => `<div class="kv">${esc(l.funcion)}: <b>${esc(l.modeloId || l.alias)}</b>${l.error ? ' <span class="falla">error</span>' : ''}<span class="muted"> · prompt ${esc(l.plantilla || '—')}</span></div>`).join('')
+        : `<span class="small muted">${esc(p.modelo.motor)}</span>`;
+      const cfgv = p.versiones.configuracion;
+      const frag = p.rag.recuperados
+        .map((f) => `<span class="chip ${p.rag.citados.includes(f.id) ? 'citado' : p.rag.enviadosAlModelo.includes(f.id) ? 'enviado' : ''}" title="${f.plan ? 'Indicación propia de la médica' : `Módulo ${esc(f.modulo)}`} · versión ${esc(f.version)} · score ${f.score ?? '—'}">${esc(f.id)}</span>`)
+        .join('');
+      const texto = entrada ? entrada.text || (entrada.attachment && `[${entrada.attachment.nombre}]`) : p.entrada ? '(mensaje de otra sesión)' : esc(p.interaccion);
+      return `<tr id="prov-${p.id}" class="${audResaltar === p.id ? 'resaltado' : ''}">
+        <td class="small">${fDT(p.ts)}<div class="muted">${esc(p.actor.nombre)}</div></td>
+        <td class="small">${esc(corto(texto))}<div class="muted">${esc(p.interaccion)} · ${p.respuestas.length} salida(s)</div></td>
+        <td><div class="tags">${pills}</div></td>
+        <td>${modelos}</td>
+        <td class="small">${cfgv ? `config v${cfgv.version}` : '—'}<div class="muted">${p.versiones.modulos.map((m) => `${m.id} ${m.version}`).join(' · ')}${p.versiones.alarmasGenericas ? ` · genéricas ${p.versiones.alarmasGenericas}` : ''}</div></td>
+        <td><div class="chips-frag">${frag || '<span class="small muted">—</span>'}</div></td>
+        <td><details><summary>JSON</summary><pre class="mini">${esc(JSON.stringify(p, null, 1))}</pre></details></td>
+      </tr>`;
+    })
+    .join('');
+  setHTML(
+    'tab-auditoria',
+    `<div class="stack">
+    <div class="callout">Trazabilidad como software de uso médico. Cada <b>respuesta</b> del asistente queda asociada al modelo y la plantilla de prompt, las versiones de los módulos, la versión de la configuración de la médica y los fragmentos del RAG (<b>Provenance</b>). Cada <b>cambio de configuración</b> registra quién, cuándo y el valor antes y después (<b>AuditEvent</b>). Todo se guarda en la carpeta <b>logs/</b> del proyecto, fuera del estado de la demo: “Reiniciar” no lo borra.</div>
+    <div class="sim-head">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        ${integ('auditoría', AUD.integridad.auditoria)} ${integ('procedencia', AUD.integridad.procedencia)}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <select id="audAlcance" class="sm"><option value="sesion" ${audAlcance === 'sesion' ? 'selected' : ''}>Esta sesión</option><option value="todo" ${audAlcance === 'todo' ? 'selected' : ''}>Todas las sesiones</option></select>
+        ${descargas}
+      </div>
+    </div>
+    <div class="small muted">Versión vigente: app ${esc(v.app.version)}${v.app.commit ? ` (${esc(v.app.commit)})` : ''} · ${v.modulos.map((m) => `${esc(m.id)} ${esc(m.version)}`).join(' · ') || 'sin módulos'} · alarmas genéricas ${esc(v.alarmasGenericas || '—')} · ${v.configuracion ? `configuración v${v.configuracion.version} (sha256 ${v.configuracion.sha256.slice(0, 12)})` : 'sin configuración'}</div>
+    <div class="section" style="overflow-x:auto">
+      <h3>Cambios de configuración <span class="hint">AuditEvent · más recientes primero</span></h3>
+      ${filasAud ? `<table class="t audtbl"><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Objeto</th><th>Antes → después</th><th>Config.</th></tr>${filasAud}</table>` : '<div class="empty">Sin cambios registrados</div>'}
+    </div>
+    <div class="section" style="overflow-x:auto">
+      <h3>Origen de las respuestas <span class="hint">Provenance · fragmentos: <span class="chip citado">citado</span> <span class="chip enviado">enviado al modelo</span> <span class="chip">recuperado</span></span></h3>
+      ${filasProv ? `<table class="t audtbl"><tr><th>Cuándo</th><th>Entrada</th><th>Decisión</th><th>Modelo</th><th>Versiones</th><th>Fragmentos RAG</th><th></th></tr>${filasProv}</table>` : '<div class="empty">Sin respuestas registradas</div>'}
+    </div>
+  </div>`,
+  );
+  if (audResaltar) {
+    const row = document.getElementById(`prov-${audResaltar}`);
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      audResaltar = null;
+    }
+  }
+}
+
 // ---------------- Eventos ----------------
 function switchTab(t) {
   if (!t) return;
@@ -1024,9 +1140,19 @@ function switchTab(t) {
 }
 
 document.addEventListener('click', async (e) => {
+  const pv = e.target.closest('[data-prov]');
+  if (pv) {
+    audResaltar = pv.dataset.prov;
+    switchTab('auditoria');
+    return cargarAuditoria();
+  }
   const t = e.target.closest('button, .opt, .step');
   if (!t) return;
-  if (t.classList.contains('tab')) return switchTab(t.dataset.tab);
+  if (t.classList.contains('tab')) {
+    switchTab(t.dataset.tab);
+    if (t.dataset.tab === 'auditoria') cargarAuditoria();
+    return;
+  }
   if (t.classList.contains('step')) return switchTab(t.dataset.goto);
   if (t.id === 'btnImport') {
     await act('/api/hce/import', {}, 'Datos importados desde la HCE (mock FHIR)');
@@ -1164,6 +1290,10 @@ document.addEventListener('change', (e) => {
     renderAlarmas();
   }
   if (e.target.id === 'fileInput') chooseFile(e.target.files[0]);
+  if (e.target.id === 'audAlcance') {
+    audAlcance = e.target.value;
+    cargarAuditoria();
+  }
   if (e.target.id === 'planFile' && e.target.files[0]) {
     const f = e.target.files[0];
     f.text().then((txt) => usarPlan(f.name, txt));

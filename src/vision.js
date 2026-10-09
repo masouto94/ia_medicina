@@ -10,6 +10,7 @@ const ALM = require('./alarmas');
 const G = require('./guardrails');
 const TERM = require('./terminologia');
 const { normalize, uid, fmtDateTime } = require('./util');
+const T = require('./trazabilidad');
 
 const TOOL = {
   name: 'registrar_archivo',
@@ -84,6 +85,8 @@ async function analyze(filePath, mime, nombre, caption, cfg) {
       messages: [{ role: 'user', content: [block, { type: 'text', text: `Archivo "${nombre}" enviado por la paciente.${caption ? ` Texto que lo acompaña: "${caption}"` : ''}` }] }],
       tool: TOOL,
       maxTokens: 1500,
+      funcion: 'analizar archivo',
+      plantilla: T.sha(systemPrompt.toString() + JSON.stringify(TOOL)).slice(0, 16),
     });
     llm.setError(null);
     return { data: r.data, motor: `${llm.MODEL} (visión)`, ms: r.ms };
@@ -128,7 +131,12 @@ function mockAnalyze(nombre, mime, caption) {
   return { tipo: 'otro', legible: false, respuesta_para_paciente: 'Recibí la imagen, pero no pude identificar qué es. Puedo registrar fotos del glucómetro, del tensiómetro, de tus remedios, de tus análisis o de una lesión para que la vea la médica.', nota_para_medico: '' };
 }
 
-async function handleFile({ path: filePath, mime, nombre, url, caption }) {
+// Cada archivo queda registrado con su procedencia (logs/procedencia.jsonl + FHIR Provenance)
+function handleFile(archivo) {
+  return T.enInteraccion('archivo', () => procesarArchivo(archivo));
+}
+
+async function procesarArchivo({ path: filePath, mime, nombre, url, caption }) {
   const st = S.get();
   const cfg = st.assistant.config;
   const isPdf = mime === 'application/pdf';

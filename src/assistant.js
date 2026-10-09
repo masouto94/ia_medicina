@@ -10,6 +10,7 @@ const G = require('./guardrails');
 const TERM = require('./terminologia');
 const OE = require('./mocks/openevidence');
 const agenda = require('./mocks/agenda');
+const T = require('./trazabilidad');
 const { normalize, fmtDateTime, fmtTime, uid } = require('./util');
 
 const TEMAS = [
@@ -173,7 +174,12 @@ function historial(n = 10) {
 
 // ======================= Pipeline principal =======================
 
-async function handleText(text, { via = 'texto', attachment = null } = {}) {
+// Cada interacción queda registrada con su procedencia (logs/procedencia.jsonl + FHIR Provenance)
+function handleText(text, opciones = {}) {
+  return T.enInteraccion(opciones.via === 'audio' ? 'audio' : 'texto', () => procesarTexto(text, opciones));
+}
+
+async function procesarTexto(text, { via = 'texto', attachment = null } = {}) {
   const st = S.get();
   const cfg = st.assistant.config;
   const pasos = [];
@@ -200,6 +206,8 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
   pasos.push({ paso: 'RAG – indicaciones + base especializada', detalle: chunks.length ? chunks.map((c) => `${c.id} (${c.score})`).join(', ') : 'Sin fragmentos relevantes' });
   // Al modelo se le pasan TODAS las indicaciones de la médica (son pocas) + los fragmentos generales recuperados
   const contexto = [...plan.map((c) => ({ ...c, plan: true })), ...generales];
+  T.anotar('rag', [...chunks, ...plan.filter((p) => !chunks.includes(p)).map((p) => ({ ...p, score: 0 }))]);
+  T.anotar('contexto', contexto.map((c) => c.id));
 
   // 3) Clasificación de intención + respuesta
   let out;
@@ -209,6 +217,8 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
         system: systemPrompt(cfg, contexto),
         messages: [{ role: 'user', content: `Historial reciente del chat:\n${historial() || '(vacío)'}\n\nNUEVO MENSAJE DE MARTA${via === 'audio' ? ' (transcripción de audio)' : ''}:\n${text}` }],
         tool: TOOL_RESPONDER,
+        funcion: 'clasificar y responder',
+        plantilla: PLANTILLA_RESPONDER,
       });
       out = r.data;
       llm.setError(null);
@@ -254,6 +264,7 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
   // 5) Evidencia (OpenEvidence mock) si la base especializada no alcanza
   if (out.requiere_evidencia) {
     const ev = OE.consultar(text);
+    T.anotar('evidencia', { servicio: 'OpenEvidence (mock)', consulta: ev.query_anonimizada, encontrado: ev.encontrado, tema: ev.tema || null, sugiereCambio: !!ev.sugiere_cambio_tratamiento, destino: ev.sugiere_cambio_tratamiento ? 'médica' : 'paciente (reformulada)' });
     st.evidenceQueries.unshift({ ...ev, ts: st.clock, origen: 'paciente (en segundo plano)', pregunta: ev.query_anonimizada });
     pasos.push({ paso: 'OpenEvidence (mock)', detalle: `Consulta anonimizada: "${ev.query_anonimizada}" → ${ev.encontrado ? ev.tema : 'sin resultado'}${ev.sugiere_cambio_tratamiento ? ' · SUGIERE CAMBIO DE TRATAMIENTO → a la médica' : ''}` });
     reply.evidence = { tema: ev.tema, citas: ev.citas.length, servicio: ev.servicio };
@@ -275,6 +286,7 @@ async function handleText(text, { via = 'texto', attachment = null } = {}) {
   if (!out.requiere_evidencia && !out.sinEvidenciaEnSegundoPlano && out.derivar && out.derivar.necesario) {
     const ev = OE.consultar(text);
     if (ev.encontrado && ev.sugiere_cambio_tratamiento) {
+      T.anotar('evidencia', { servicio: 'OpenEvidence (mock)', consulta: ev.query_anonimizada, encontrado: true, tema: ev.tema || null, sugiereCambio: true, destino: 'médica (en segundo plano)' });
       st.evidenceQueries.unshift({ ...ev, ts: st.clock, origen: 'paciente (en segundo plano)', pregunta: ev.query_anonimizada });
       st.suggestions.push({ id: uid('sug'), ts: st.clock, estado: 'pendiente', origen: 'OpenEvidence (mock)', pregunta: text, tema: ev.tema, texto: ev.respuesta, citas: ev.citas });
       reply.evidence = { tema: ev.tema, citas: ev.citas.length, servicio: ev.servicio };
@@ -362,6 +374,8 @@ Plan de cuidado:\n${planText(cfg)}`,
       messages: [{ role: 'user', content: `Pregunta de la paciente: "${pregunta}"\n\nEvidencia (OpenEvidence): ${ev.respuesta}\nSugiere cambio de tratamiento: ${ev.sugiere_cambio_tratamiento ? 'sí' : 'no'}` }],
       tool: TOOL_REFORMULAR,
       maxTokens: 600,
+      funcion: 'reformular evidencia',
+      plantilla: PLANTILLA_REFORMULAR,
     });
     pasos.push({ paso: 'LLM – reformulación filtrada', detalle: `Evidencia traducida a lenguaje llano (${r.ms} ms)` });
     return r.data.respuesta;
@@ -480,6 +494,10 @@ function advanceTo(t, withReminder) {
 }
 
 function answerReminder(msgId, tomada) {
+  return T.enInteraccion('respuesta a recordatorio', () => responderRecordatorio(msgId, tomada));
+}
+
+function responderRecordatorio(msgId, tomada) {
   const st = S.get();
   const msg = st.messages.find((m) => m.id === msgId);
   if (!msg || msg.answered) return;
@@ -491,6 +509,7 @@ function answerReminder(msgId, tomada) {
     C.addMessage({ from: 'asistente', kind: 'text', text: '¡Bien! Quedó registrada. 👍', intent: 'adherencia' });
   } else {
     const c = rag.getChunk('DM2-02');
+    T.anotar('rag', { id: c.id, modulo: c.modulo, score: null });
     C.addTopic('dosis olvidada');
     C.addMessage({ from: 'asistente', kind: 'text', text: `Gracias por avisarme. ${c.texto}`, intent: 'educativa', topic: 'dosis olvidada', sources: [{ id: c.id, titulo: c.titulo, modulo: c.modulo }] });
     pasos.push({ paso: 'RAG', detalle: 'Se envía contenido educativo DM2-02 (dosis olvidada)' });
@@ -500,6 +519,10 @@ function answerReminder(msgId, tomada) {
 }
 
 function bookSlot(slotId) {
+  return T.enInteraccion('reserva de turno', () => reservarTurno(slotId));
+}
+
+function reservarTurno(slotId) {
   const st = S.get();
   const slot = (st.pendingSlots || []).find((s) => s.id === slotId);
   if (!slot) return;
@@ -526,7 +549,11 @@ function doctorReply(refId, texto) {
   S.save();
 }
 
-async function preconsultaSummary() {
+function preconsultaSummary() {
+  return T.enInteraccion('resumen preconsulta', generarResumen);
+}
+
+async function generarResumen() {
   const st = S.get();
   const cfg = st.assistant.config;
   const m = C.metrics(14);
@@ -551,6 +578,8 @@ Turnos: ${st.appointments.map((a) => fmtDateTime(a.inicio)).join(', ') || 'ningu
       const r = await llm.text({
         system: `Sos un sistema de apoyo a la decisión clínica. Redactá para ${cfg.medico.nombre} un resumen preconsulta conciso (máximo 180 palabras) del período entre consultas de su paciente ${cfg.paciente.nombre}. Estructura con títulos breves: Adherencia, Control glucémico, Presión arterial, Eventos y alertas, Consultas de la paciente, Puntos a revisar en la consulta. Usá solo los datos provistos, no inventes. No indiques tratamientos: señalá puntos a evaluar. Español rioplatense profesional. Formato texto plano con guiones.`,
         messages: [{ role: 'user', content: `Plan:\n${planText(cfg)}\n\nDatos del período:\n${datos}` }],
+        funcion: 'resumen preconsulta',
+        plantilla: PLANTILLA_RESUMEN,
       });
       texto = r.data;
       motor = llm.MODEL;
@@ -577,10 +606,16 @@ ${st.suggestions.filter((s) => s.estado === 'pendiente').map((s) => `- Sugerenci
   }
   const sum = { id: uid('comp'), ts: st.clock, texto, motor };
   st.summaries.unshift(sum);
+  T.anotar('salidas', { id: sum.id, kind: 'resumen preconsulta', recurso: 'Composition', destino: 'médica', text: texto });
   S.trace('Resumen preconsulta generado', [{ paso: 'CDS – reporte focalizado', detalle: `Composition generada con ${motor}` }]);
   S.save();
   return sum;
 }
+
+// Huellas de las plantillas de prompt: cambian solas si se modifica el código que arma el prompt o su esquema
+const PLANTILLA_RESPONDER = T.sha(systemPrompt.toString() + JSON.stringify(TOOL_RESPONDER)).slice(0, 16);
+const PLANTILLA_REFORMULAR = T.sha(reformular.toString() + JSON.stringify(TOOL_REFORMULAR)).slice(0, 16);
+const PLANTILLA_RESUMEN = T.sha(generarResumen.toString()).slice(0, 16);
 
 module.exports = {
   TEMAS,

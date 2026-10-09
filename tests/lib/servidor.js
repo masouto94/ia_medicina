@@ -11,7 +11,7 @@ async function iniciar({ env = {}, timeoutMs = 60000 } = {}) {
   const port = 4100 + Math.floor(Math.random() * 800);
   const child = spawn(process.execPath, ['server.js'], {
     cwd: RAIZ,
-    env: { ...process.env, DATA_DIR: dataDir, PORT: String(port), ...env },
+    env: { ...process.env, DATA_DIR: dataDir, LOGS_DIR: path.join(dataDir, 'logs'), PORT: String(port), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -57,7 +57,7 @@ async function iniciar({ env = {}, timeoutMs = 60000 } = {}) {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 
-  return { base, api, detener, log: () => log };
+  return { base, api, detener, log: () => log, dataDir, logsDir: path.join(dataDir, 'logs') };
 }
 
 module.exports = { iniciar, RAIZ };

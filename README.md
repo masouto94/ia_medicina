@@ -77,6 +77,13 @@ El asistente **no diagnostica, no cambia medicación y no reemplaza la consulta*
 5. **Evidencia.** Consultar literatura médica sobre el caso (OpenEvidence, simulado).
 6. **HCE · FHIR · CDS Hooks.** Descargar todo lo registrado en formato FHIR y ver cómo aparecerían las alertas dentro de la historia clínica al abrir el registro de la paciente.
 7. **Trazas del sistema.** Para cada mensaje, el recorrido que hizo: qué alarmas se evaluaron, qué información se usó, qué decidió el modelo y qué se registró.
+8. **Auditoría.** El registro que pide un software de uso médico:
+   - **Cambios de configuración:** quién hizo cada cambio, cuándo, y el valor antes y después. Incluye pausar, modificar, agregar o eliminar alarmas, cambios del formulario, importar la HCE y reiniciar la demo.
+   - **Origen de las respuestas:** para cada respuesta del asistente, qué modelo y qué plantilla de prompt la generaron, las versiones de los módulos, la versión de la configuración de la médica y los fragmentos del RAG que intervinieron. Incluye la decisión de los guardrails y si se consultó evidencia.
+   - **Integridad:** un indicador verde confirma que nadie modificó ni borró registros.
+   - **Descargas:** los archivos de la carpeta `logs/`, también en formato FHIR.
+
+   En el teléfono, cada respuesta tiene un enlace **procedencia** que lleva a su fila en esta pestaña.
 
 ### Para la paciente (teléfono)
 
@@ -144,6 +151,7 @@ Hay dos planes de ejemplo en `muestras/planes/`: *Un día de Marta* (un día com
 6. Exportar el Bundle FHIR y simular la apertura en la HCE.
 7. Mirar las **Trazas del sistema** para explicar cómo se procesó cada mensaje.
 8. Ejecutar el plan *Batería de alarmas y alcance* y mostrar el reporte de la pestaña **Simulación**.
+9. Abrir **Auditoría**: ver quién pausó una alarma y con qué valores, y desde una respuesta del chat seguir el enlace *procedencia*.
 
 ---
 
@@ -178,13 +186,13 @@ node server.js
 ## Tests
 
 ```bash
-npm test logic        # sin LLM: rápido (~2 s), determinístico
+npm test logic        # sin LLM: rápido (~10 s), determinístico
 npm test generative   # con el LLM real configurado (Claude Code o API key): ~2-4 min
 ```
 
 | Suite | Qué prueba |
 |---|---|
-| `logic` | Los tests están en `tests/logic/`: alarmas (frases, negación, umbrales, pausar, modificar, agregar, eliminar), guardrails (12 propuestas del modelo, 2 válidas y 10 tramposas), simulación con plan (validación, métricas, bloqueo mientras corre), módulos (incluye una patología nueva agregada sólo con un JSON) y el recorrido completo de la app por la API. El recorrido corre en modo simulado y con un "Claude falso" (`tests/fixtures/fake-claude.js`) que devuelve respuestas tramposas a propósito. |
+| `logic` | Los tests están en `tests/logic/`: alarmas (frases, negación, umbrales, pausar, modificar, agregar, eliminar), guardrails (12 propuestas del modelo, 2 válidas y 10 tramposas), trazabilidad y auditoría (antes/después, procedencia, integridad de logs/, inyección FHIR), simulación con plan (validación, métricas, bloqueo mientras corre), módulos (incluye una patología nueva agregada sólo con un JSON) y el recorrido completo de la app por la API. El recorrido corre en modo simulado y con un "Claude falso" (`tests/fixtures/fake-claude.js`) que devuelve respuestas tramposas a propósito. |
 | `generative` | `tests/generative/casos.json`: 17 casos clínicos contra el asistente con Claude real. Usan el mismo formato y la misma comparación que *Simular con un plan JSON*. Para cada paso se indica lo esperado: alarma sí/no y su origen, intención, derivación y prioridad, registro, fuente citada, consulta de evidencia y si está fuera de alcance. Al final informa sensibilidad y falsos positivos de las alarmas, derivaciones correctas y preguntas fuera de alcance, y guarda el detalle en `tests/resultados/`. |
 
 Los tests usan una carpeta de estado temporal y un puerto propio, así que no tocan la demo en `data/`. La suite `generative` no es determinística; para ver la variabilidad se puede repetir cada caso: `GENERATIVE_REPEAT=3 npm test generative`. La guía completa para correr, crear, modificar y validar tests está en [`tests/README.md`](tests/README.md).
@@ -206,6 +214,49 @@ Los tests usan una carpeta de estado temporal y un puerto propio, así que no to
 Si el indicador del motor dice "Modo simulado", al pasar el mouse por encima se ve el motivo.
 
 En modo simulado, el tipo de foto se deduce del nombre del archivo (por ejemplo, `glucometro_120.jpg` o `tensiometro_150_90.jpg`). Con IA real, se analiza la imagen.
+
+## Trazabilidad y auditoría (carpeta `logs/`)
+
+La app se trata como software de uso médico: todo lo que hace queda registrado en la carpeta `logs/`. Esa carpeta está separada del estado de la demo (`data/`), **Reiniciar** no la borra y no va a git.
+
+```
+logs/
+├── auditoria.jsonl          cambios de configuración: quién, cuándo, antes y después
+├── procedencia.jsonl        origen de cada respuesta del asistente
+└── fhir/
+    ├── AuditEvent.ndjson    los mismos registros como recursos FHIR R4
+    └── Provenance.ndjson    (NDJSON, el formato de FHIR Bulk Data)
+```
+
+- **Un registro por línea, sólo se agregan.** Cada uno lleva la sesión de la demo en la que ocurrió (cada **Reiniciar** abre una sesión nueva), la hora simulada y la hora real.
+- **Integridad.** Cada línea guarda el hash SHA-256 de la anterior y el suyo. Si alguien edita, borra o reordena una línea, la verificación lo detecta. El resultado se ve en la pestaña *Auditoría* y en `GET /api/auditoria`.
+- **Quién.** El simulador no tiene login, así que el panel actúa como la Dra. Lucía y el teléfono como Marta. Una simulación con plan figura como *Simulación con plan "…" (iniciada por la Dra. Lucía Fernández)*. En un sistema real, el usuario saldría de la autenticación.
+- **Qué versiones.**
+  - La app: versión de `package.json` y commit de git.
+  - El modelo: el id exacto que respondió (por ejemplo `claude-sonnet-5-5`), la versión del CLI y los tokens. Si Claude Code usó otro modelo auxiliar en la misma llamada, también queda registrado.
+  - El prompt: una huella de la plantilla, que cambia sola si se modifica el código que arma el prompt, y una huella del prompt exacto que se envió.
+  - La base: la versión de cada módulo y de las alarmas genéricas.
+  - La configuración de la médica: su número de versión, que sube con cada cambio, y una huella SHA-256.
+  - Los fragmentos del RAG: los recuperados, los enviados al modelo y los citados, cada uno con su versión.
+- **Privacidad.** Los logs no guardan el texto de los mensajes, sólo su id y su huella SHA-256. El texto está en la historia clínica y en el estado de la demo.
+- **FHIR.**
+  - `Provenance`: el *target* es la respuesta (un `Communication`) o el resumen preconsulta (un `Composition`). Los *agents* son el software (author), el modelo (assembler) y los guardrails (verifier). Las *entities* son el mensaje de la paciente, la configuración, los módulos, los fragmentos (los citados con rol `quotation`) y la plantilla del prompt.
+  - `AuditEvent`: tipo `rest` con subtipo `create`, `update`, `delete` u `operation`. El valor anterior, el nuevo y los cambios campo por campo van en `entity.detail`.
+  - Las referencias son lógicas (por identificador `urn:asistente:*`), así que se pueden cargar en cualquier servidor FHIR sin que existan la paciente o la médica. También se incluyen en el Bundle de *Exportar a la HCE*, filtrados por la sesión actual.
+
+**Inyectar los logs en otro sistema:**
+
+```bash
+npm run logs:fhir                                         # arma logs/fhir/bundle-batch.json
+npm run logs:fhir -- --servidor http://localhost:8080/fhir  # lo envía a un servidor FHIR R4
+npm run logs:fhir -- --servidor URL --token XXX --sesion ses-...   # con token y sólo una sesión
+```
+
+Envía un Bundle `batch` con `PUT <Tipo>/<id>`, así que correrlo dos veces no duplica nada. Antes de enviar verifica la cadena de hashes, y si está rota no envía nada (salvo con `--forzar`).
+
+Los archivos `.jsonl` y `.ndjson` también se pueden levantar directamente con un recolector de logs (Fluent Bit, Filebeat, Vector) o un SIEM, porque cada línea es un JSON completo. La carpeta se cambia con la variable `LOGS_DIR`; los tests usan una temporal.
+
+Los recursos se validaron estructuralmente contra FHIR R4 con la librería `fhir` de npm. No se pudo usar el validador oficial de HL7, porque necesita descargar paquetes de `packages.fhir.org` y ese sitio no estaba accesible durante el desarrollo.
 
 ## Origen de los códigos de terminología
 
@@ -271,6 +322,9 @@ src/rag.js             recuperación sobre los fragmentos de los módulos
 src/clinic.js          observaciones, tomas, alertas, métricas (PDC)
 src/fhir.js            Bundle FHIR R4 + CDS Hooks
 src/terminologia.js    SNOMED CT y UCUM para el export
+src/trazabilidad.js    procedencia de cada respuesta y auditoría de cambios (Provenance / AuditEvent)
+src/logs.js            registro append-only en logs/ con hash encadenado
+scripts/inyectar_fhir.js  envía logs/fhir a un servidor FHIR (npm run logs:fhir)
 src/seed.js            14 días de datos de ejemplo
 src/configuracion.js   acciones de la médica: importar la HCE, generar el asistente, alarmas
 src/simulacion.js      simulación con un plan JSON (validación, ejecución en segundo plano)
@@ -282,6 +336,7 @@ muestras/planes/       planes JSON de ejemplo para Simular
 public/                interfaz
 tests/                 tests (npm test logic | generative)
 data/                  estado de la simulación (se crea solo)
+logs/                  auditoría y procedencia (se crea sola; Reiniciar no la borra)
 ```
 
 *Prototipo académico. El contenido clínico es una adaptación simplificada para demostración, y todos los datos son ficticios.*

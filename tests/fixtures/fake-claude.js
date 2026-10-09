@@ -19,7 +19,7 @@ const system = i >= 0 ? fs.readFileSync(args[i + 1], 'utf8') : '';
 let input = '';
 process.stdin.on('data', (d) => (input += d));
 process.stdin.on('end', () => {
-  const salida = (obj) => console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: typeof obj === 'string' ? obj : JSON.stringify(obj) }));
+  const salida = (obj) => console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, modelUsage: { 'claude-chico-interno': { inputTokens: 3, outputTokens: 1 }, 'claude-falso-sonnet-1': { inputTokens: 10, outputTokens: 5 } }, usage: { input_tokens: 10, output_tokens: 5 }, result: typeof obj === 'string' ? obj : JSON.stringify(obj) }));
   const msg = input.split('NUEVO MENSAJE DE MARTA').pop();
 
   // Análisis de archivos (módulo de visión)

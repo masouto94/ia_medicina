@@ -14,6 +14,8 @@ const llm = require('./src/llm');
 const ALM = require('./src/alarmas');
 const CFG = require('./src/configuracion');
 const SIM = require('./src/simulacion');
+const T = require('./src/trazabilidad');
+const LOGS = require('./src/logs');
 const hce = require('./src/mocks/hce');
 const OE = require('./src/mocks/openevidence');
 const { seed14 } = require('./src/seed');
@@ -23,6 +25,13 @@ const { uid, fmtDateTime } = require('./src/util');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+// Quién hace cada pedido (para la auditoría y la procedencia). El simulador no tiene login: el panel es la
+// Dra. Lucía y el teléfono es Marta. En un sistema real esto saldría de la autenticación.
+app.use((req, res, next) => {
+  const paciente = /^\/api\/(chat|reminder|slot)\b/.test(req.path);
+  const base = paciente ? T.ACTORES.paciente : T.ACTORES.medica;
+  T.conActor({ ...base, ip: req.ip || null }, next);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(S.UPLOADS_DIR));
 app.use('/muestras', express.static(path.join(__dirname, 'muestras')));
@@ -87,12 +96,8 @@ app.get('/api/catalog', (req, res) => {
 });
 
 // ---------- Simulación ----------
-app.post('/api/sim/reset', wrap(() => { S.reset(); }));
-app.post('/api/sim/seed', wrap(() => {
-  needAssistant();
-  if (S.get().seeded) throw new Error('Los 14 días de ejemplo ya fueron generados. Reiniciá la demo para volver a empezar.');
-  seed14();
-}));
+app.post('/api/sim/reset', wrap(() => CFG.reiniciarDemo()));
+app.post('/api/sim/seed', wrap(() => { CFG.generarDatosEjemplo(seed14); }));
 app.post('/api/sim/next-dose', wrap(() => { needAssistant(); A.advanceToNextDose(); }));
 app.post('/api/sim/advance', wrap((req) => {
   needAssistant();
@@ -208,6 +213,28 @@ app.post('/api/evidence', wrap((req) => {
   S.save();
   return ev;
 }));
+
+// ---------- Trazabilidad y auditoría (logs/) ----------
+app.get('/api/auditoria', (req, res) => {
+  const sesion = req.query.alcance === 'todo' ? null : S.get().sesion;
+  const limite = Math.min(Number(req.query.limite) || 300, 2000);
+  res.json({
+    sesion: S.get().sesion,
+    alcance: sesion ? 'sesion' : 'todo',
+    auditoria: LOGS.leer('auditoria', { sesion, limite }),
+    procedencia: LOGS.leer('procedencia', { sesion, limite }),
+    integridad: { auditoria: LOGS.verificar('auditoria'), procedencia: LOGS.verificar('procedencia') },
+    archivos: LOGS.archivos(),
+    versiones: T.versiones(),
+  });
+});
+app.get('/api/logs/:archivo', (req, res) => {
+  const ruta = LOGS.rutaDescarga(req.params.archivo);
+  if (!ruta) return res.status(404).json({ error: 'Archivo de log desconocido' });
+  if (!fs.existsSync(ruta)) return res.type('application/x-ndjson').send('');
+  res.setHeader('Content-Disposition', `attachment; filename="${req.params.archivo}"`);
+  res.type(req.params.archivo.endsWith('.ndjson') ? 'application/fhir+ndjson' : 'application/x-ndjson').send(fs.readFileSync(ruta));
+});
 
 // ---------- FHIR y CDS Hooks ----------
 app.get('/api/fhir/bundle', (req, res) => {

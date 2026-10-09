@@ -26,7 +26,12 @@ const CMP = { '<': (a, b) => a < b, '<=': (a, b) => a <= b, '>': (a, b) => a > b
 function validarAlarmaModelo({ alarma, evidencia, cfg, contextoIds = [], oeConsultado = false }) {
   const checks = [];
   const add = (check, ok, detalle) => checks.push({ check, ok, detalle });
-  const fin = (motivo, regla = null) => ({ aceptada: checks.every((c) => c.ok), motivo, regla, checks });
+  const fin = (motivo, regla = null) => {
+    const r = { aceptada: checks.every((c) => c.ok), motivo, regla, checks };
+    // trazabilidad: la decisión de los guardrails queda en la procedencia de la respuesta
+    require('./trazabilidad').anotar('guardrails', { propuesta: alarma ? alarma.regla_id || null : null, aceptada: r.aceptada, regla: regla ? regla.id : null, fallidos: checks.filter((c) => !c.ok).map((c) => c.check) });
+    return r;
+  };
 
   if (!alarma || !alarma.es_alarma) return { aceptada: false, motivo: 'El modelo no propuso alarma', regla: null, checks };
 

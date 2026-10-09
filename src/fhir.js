@@ -5,6 +5,7 @@ const hce = require('./mocks/hce');
 const M = require('./modulos');
 const TERM = require('./terminologia');
 const { fmtDateTime } = require('./util');
+const LOGS = require('./logs');
 
 const P = { reference: `Patient/${hce.PATIENT_ID}`, display: 'Marta González' };
 const DR = { reference: `Practitioner/${hce.PRACTITIONER_ID}`, display: 'Dra. Lucía Fernández' };
@@ -129,6 +130,9 @@ function bundle(baseUrl = 'http://localhost:3000') {
   for (const s of st.summaries) {
     add({ resourceType: 'Composition', id: s.id, status: 'final', type: { text: 'Resumen preconsulta del período entre consultas' }, subject: P, date: iso(s.ts), author: [{ display: `lucia-marta-assistant (${s.motor})` }], title: 'Resumen preconsulta', section: [{ title: 'Resumen', text: { status: 'generated', div: `<div xmlns="http://www.w3.org/1999/xhtml"><pre>${escapeHtml(s.texto)}</pre></div>` } }] });
   }
+  // Trazabilidad de esta sesión (desde logs/): origen de cada respuesta y cambios de configuración
+  for (const r of LOGS.leerFhir('procedencia', { sesion: st.sesion })) add(r);
+  for (const r of LOGS.leerFhir('auditoria', { sesion: st.sesion })) add(r);
   return JSON.parse(JSON.stringify({ resourceType: 'Bundle', id: `export-${Date.now()}`, type: 'collection', timestamp: iso(st.clock), entry: entries }));
 }
 
