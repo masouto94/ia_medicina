@@ -137,9 +137,9 @@ test('API de simulación con plan (modo simulado)', async (t) => {
     assert.match(e.error, /pausa inexistente: no se pudo aplicar la configuración/);
   });
 
-  await t.test('el reporte se puede descargar', async () => {
+  await t.test('el reporte no se descarga como archivo (las respuestas nombran a la paciente)', async () => {
     const r = await fetch(`${srv.base}/api/sim/plan?download=1`);
-    assert.match(r.headers.get('content-disposition') || '', /attachment; filename="reporte-sim-\d+\.json"/);
+    assert.equal(r.headers.get('content-disposition'), null);
   });
 });
 

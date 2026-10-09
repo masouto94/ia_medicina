@@ -16,6 +16,7 @@ const CFG = require('./src/configuracion');
 const SIM = require('./src/simulacion');
 const T = require('./src/trazabilidad');
 const LOGS = require('./src/logs');
+const SEUD = require('./src/seudonimo');
 const hce = require('./src/mocks/hce');
 const OE = require('./src/mocks/openevidence');
 const { seed14 } = require('./src/seed');
@@ -125,13 +126,17 @@ app.post('/api/sim/plan/cancel', wrap(() => SIM.cancelar()));
 app.get('/api/sim/plan', (req, res) => {
   const e = SIM.estado();
   if (!e) return res.status(404).json({ error: 'Todavía no se ejecutó ningún plan' });
-  if (req.query.download) res.setHeader('Content-Disposition', `attachment; filename="reporte-${e.id}.json"`);
   res.json(e);
 });
 
 // ---------- HCE (mock FHIR) ----------
 app.post('/api/hce/import', wrap(() => CFG.importarHCE()));
-app.get('/api/hce/bundle', (req, res) => res.json(hce.everything()));
+// Ver los datos de origen de la HCE es un acceso a datos identificados: queda auditado
+app.get('/api/hce/bundle', (req, res) => {
+  const b = hce.everything();
+  T.auditar({ accion: 'R', evento: 'Datos de la HCE consultados', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Registro de la paciente en la HCE' }, detalle: `${b.entry.length} recursos vistos en el panel`, versionAntes: null, versionDespues: null });
+  res.json(b);
+});
 app.get('/api/assistant/default', wrap(() => {
   const st = S.get();
   if (!st.hce) throw new Error('Importá primero los datos desde la HCE.');
@@ -223,27 +228,51 @@ app.get('/api/auditoria', (req, res) => {
     alcance: sesion ? 'sesion' : 'todo',
     auditoria: LOGS.leer('auditoria', { sesion, limite }),
     procedencia: LOGS.leer('procedencia', { sesion, limite }),
-    integridad: { auditoria: LOGS.verificar('auditoria'), procedencia: LOGS.verificar('procedencia') },
+    integridad: { auditoria: LOGS.verificar('auditoria'), procedencia: LOGS.verificar('procedencia'), trazas: LOGS.verificar('trazas') },
+    seudonimo: SEUD.seudonimo(),
     archivos: LOGS.archivos(),
     versiones: T.versiones(),
   });
 });
-app.get('/api/logs/:archivo', (req, res) => {
-  const ruta = LOGS.rutaDescarga(req.params.archivo);
-  if (!ruta) return res.status(404).json({ error: 'Archivo de log desconocido' });
-  if (!fs.existsSync(ruta)) return res.type('application/x-ndjson').send('');
-  res.setHeader('Content-Disposition', `attachment; filename="${req.params.archivo}"`);
-  res.type(req.params.archivo.endsWith('.ndjson') ? 'application/fhir+ndjson' : 'application/x-ndjson').send(fs.readFileSync(ruta));
+
+// Historial de trazas (logs/trazas.jsonl, sin datos de la paciente)
+app.get('/api/trazas', (req, res) => {
+  const sesion = req.query.alcance === 'todo' ? null : S.get().sesion;
+  res.json({ sesion: S.get().sesion, trazas: LOGS.leer('trazas', { sesion, limite: Math.min(Number(req.query.limite) || 500, 5000) }), integridad: LOGS.verificar('trazas') });
 });
 
 // ---------- FHIR y CDS Hooks ----------
+// Los datos identificados no se descargan a archivos: se ven en el panel (acceso auditado) y salen sólo
+// por el envío a la HCE (exportación auditada).
+const resumenFhir = (b) => b.entry.reduce((m, e) => ({ ...m, [e.resource.resourceType]: (m[e.resource.resourceType] || 0) + 1 }), {});
+app.get('/api/fhir/resumen', (req, res) => {
+  // cantidades por tipo de recurso, sin datos de la paciente (para la pestaña, sin generar accesos)
+  res.json({ recursos: resumenFhir(F.bundle()), exportaciones: S.get().exportaciones || [] });
+});
 app.get('/api/fhir/bundle', (req, res) => {
   const b = F.bundle(`${req.protocol}://${req.get('host')}`);
-  if (req.query.download) res.setHeader('Content-Disposition', 'attachment; filename="marta-fhir-bundle.json"');
+  T.auditar({ accion: 'R', evento: 'Bundle FHIR consultado', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Bundle FHIR de la paciente' }, detalle: `${b.entry.length} recursos vistos en el panel`, versionAntes: null, versionDespues: null });
   res.type('application/fhir+json').send(JSON.stringify(b, null, 2));
 });
+app.post('/api/hce/export', wrap(() => {
+  needAssistant();
+  const st = S.get();
+  const b = F.bundle();
+  const recursos = resumenFhir(b);
+  const exp = { id: uid('exp'), ts: st.clock, real: Date.now(), recursos, total: b.entry.length, destino: 'HCE institucional (mock FHIR)' };
+  st.exportaciones = st.exportaciones || [];
+  st.exportaciones.push(exp);
+  T.auditar({ accion: 'E', categoria: 'exportacion', evento: 'Bundle enviado a la HCE', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Registro de la paciente en la HCE' }, detalle: `POST ${exp.destino}: ${b.entry.length} recursos (${Object.entries(recursos).map(([k, v]) => `${v} ${k}`).join(', ')})`, versionAntes: null, versionDespues: null });
+  S.trace('Exportación a la HCE', [{ paso: 'HCE (mock FHIR)', detalle: `Bundle transaction con ${b.entry.length} recursos enviado a ${exp.destino}` }]);
+  S.save();
+  return exp;
+}));
 app.get('/cds-services', (req, res) => res.json(F.DISCOVERY));
-app.post('/cds-services/seguimiento-entre-consultas', (req, res) => res.json(F.cdsCards()));
+app.post('/cds-services/seguimiento-entre-consultas', (req, res) => {
+  const r = F.cdsCards();
+  T.auditar({ accion: 'R', evento: 'Registro consultado vía CDS Hooks (patient-view)', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Tarjetas CDS para la HCE' }, detalle: `${r.cards.length} tarjetas entregadas a la HCE`, versionAntes: null, versionDespues: null });
+  res.json(r);
+});
 
 const PORT = Number(process.env.PORT) || 3000;
 llm.init().then((s) => {

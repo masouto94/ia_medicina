@@ -75,13 +75,14 @@ El asistente **no diagnostica, no cambia medicación y no reemplaza la consulta*
    - **Sugerencias basadas en evidencia:** cuando una consulta implica un posible cambio de tratamiento, la evidencia llega sólo a la médica, nunca a la paciente.
    - **Resumen preconsulta:** un resumen del período para leer antes de la próxima visita.
 5. **Evidencia.** Consultar literatura médica sobre el caso (OpenEvidence, simulado).
-6. **HCE · FHIR · CDS Hooks.** Descargar todo lo registrado en formato FHIR y ver cómo aparecerían las alertas dentro de la historia clínica al abrir el registro de la paciente.
-7. **Trazas del sistema.** Para cada mensaje, el recorrido que hizo: qué alarmas se evaluaron, qué información se usó, qué decidió el modelo y qué se registró.
+6. **HCE · FHIR · CDS Hooks.** **Enviar a la HCE** todo lo registrado en formato FHIR, ver el Bundle o los datos de origen en pantalla, y ver cómo aparecerían las alertas dentro de la historia clínica al abrir el registro de la paciente. Los datos de la paciente **no se descargan a archivos**: salen del sistema sólo hacia la HCE, y cada envío y cada vista quedan en la auditoría.
+7. **Trazas del sistema.** Para cada mensaje, el recorrido que hizo: qué alarmas se evaluaron, qué información se usó, qué decidió el modelo y qué se registró. Por defecto muestra las últimas 80 de la sesión; **Historial completo** muestra todas las sesiones, sin el texto ni los datos personales de la paciente.
 8. **Auditoría.** El registro que pide un software de uso médico:
    - **Cambios de configuración:** quién hizo cada cambio, cuándo, y el valor antes y después. Incluye pausar, modificar, agregar o eliminar alarmas, cambios del formulario, importar la HCE y reiniciar la demo.
+   - **Consultas y exportaciones:** cada vez que alguien ve el Bundle, los datos de origen de la HCE o la consulta CDS Hooks, y cada envío a la HCE.
    - **Origen de las respuestas:** para cada respuesta del asistente, qué modelo y qué plantilla de prompt la generaron, las versiones de los módulos, la versión de la configuración de la médica y los fragmentos del RAG que intervinieron. Incluye la decisión de los guardrails y si se consultó evidencia.
    - **Integridad:** un indicador verde confirma que nadie modificó ni borró registros.
-   - **Descargas:** los archivos de la carpeta `logs/`, también en formato FHIR.
+   - **Paciente en los logs:** el seudónimo con el que figura la paciente (ver *Trazabilidad y auditoría* más abajo).
 
    En el teléfono, cada respuesta tiene un enlace **procedencia** que lleva a su fila en esta pestaña.
 
@@ -137,7 +138,7 @@ Para usarlo:
    - **Derivaciones correctas:** pasos en los que se derivó, o no, a la médica como se esperaba.
    - **Detalle paso por paso:** lo esperado, lo obtenido, qué no coincidió y la respuesta completa del asistente.
 
-   El reporte se puede descargar en JSON.
+   El reporte queda en la app: no se descarga, porque las respuestas del asistente nombran a la paciente.
 
 Hay dos planes de ejemplo en `muestras/planes/`: *Un día de Marta* (un día completo con el reloj avanzando) y *Batería de alarmas y alcance* (casos con y sin urgencia, una alarma pausada, una agregada y preguntas fuera de alcance). El formato completo está en [`tests/README.md`](tests/README.md#formato-de-un-plan).
 
@@ -148,7 +149,7 @@ Hay dos planes de ejemplo en `muestras/planes/`: *Un día de Marta* (un día com
 3. Adjuntar archivos de prueba, por ejemplo el glucómetro con 48 (dispara la alarma) o el informe de laboratorio.
 4. Pausar una alarma y repetir el mensaje para ver la diferencia.
 5. Usar **Simular ▾ → 14 días de ejemplo** y recorrer el panel: responder una derivación y generar el resumen preconsulta.
-6. Exportar el Bundle FHIR y simular la apertura en la HCE.
+6. Enviar el Bundle FHIR a la HCE y simular la apertura del registro (CDS Hooks).
 7. Mirar las **Trazas del sistema** para explicar cómo se procesó cada mensaje.
 8. Ejecutar el plan *Batería de alarmas y alcance* y mostrar el reporte de la pestaña **Simulación**.
 9. Abrir **Auditoría**: ver quién pausó una alarma y con qué valores, y desde una respuesta del chat seguir el enlace *procedencia*.
@@ -223,6 +224,7 @@ La app se trata como software de uso médico: todo lo que hace queda registrado 
 logs/
 ├── auditoria.jsonl          cambios de configuración: quién, cuándo, antes y después
 ├── procedencia.jsonl        origen de cada respuesta del asistente
+├── trazas.jsonl             paso a paso de cada evento (sin el texto de la paciente)
 └── fhir/
     ├── AuditEvent.ndjson    los mismos registros como recursos FHIR R4
     └── Provenance.ndjson    (NDJSON, el formato de FHIR Bulk Data)
@@ -238,10 +240,15 @@ logs/
   - La base: la versión de cada módulo y de las alarmas genéricas.
   - La configuración de la médica: su número de versión, que sube con cada cambio, y una huella SHA-256.
   - Los fragmentos del RAG: los recuperados, los enviados al modelo y los citados, cada uno con su versión.
-- **Privacidad.** Los logs no guardan el texto de los mensajes, sólo su id y su huella SHA-256. El texto está en la historia clínica y en el estado de la demo.
+- **Sin datos personales: seudónimo.** Los logs no llevan el nombre, el documento, el teléfono, la fecha de nacimiento ni el id de la paciente en la HCE.
+  - La paciente figura con un seudónimo estable: `pac-` + HMAC-SHA256 (clave, id en la HCE). Es siempre el mismo, así sus registros se relacionan entre sí y se pueden auditar.
+  - Sólo el sistema, que tiene la clave, puede saber a qué persona corresponde. La pestaña *Auditoría* muestra el seudónimo de la paciente actual.
+  - La clave sale de `LOGS_SEUDONIMO_CLAVE` en `.env`. Si no está, se genera una vez en `data/.clave-seudonimo`. Si se pierde la clave, los registros siguen relacionados entre sí, pero ya no se pueden vincular a la persona.
+- **Sin texto de la paciente.** Del texto de los mensajes sólo queda el id y la huella SHA-256. En las trazas se reemplaza lo que dijo la paciente y lo que el modelo redactó a partir de eso (el tema, el motivo de derivación, el fundamento de una alarma) por `"[texto]"`. La configuración auditada conserva los valores clínicos (umbrales, medicación) para poder auditar sus cambios, pero no los datos de la paciente.
+- **Nada se descarga desde la app.** Los datos identificados se ven en pantalla, y cada vista queda auditada. Salen del sistema sólo con **Enviar a la HCE**, que queda auditado como exportación (`AuditEvent` tipo DICOM 110106 *Export*). Los logs salen sólo con el script de inyección.
 - **FHIR.**
   - `Provenance`: el *target* es la respuesta (un `Communication`) o el resumen preconsulta (un `Composition`). Los *agents* son el software (author), el modelo (assembler) y los guardrails (verifier). Las *entities* son el mensaje de la paciente, la configuración, los módulos, los fragmentos (los citados con rol `quotation`) y la plantilla del prompt.
-  - `AuditEvent`: tipo `rest` con subtipo `create`, `update`, `delete` u `operation`. El valor anterior, el nuevo y los cambios campo por campo van en `entity.detail`.
+  - `AuditEvent`: tipo `rest` con subtipo `create`, `read`, `update`, `delete` u `operation`; un envío a la HCE es tipo DICOM `110106` *Export*. El valor anterior, el nuevo y los cambios campo por campo van en `entity.detail`. La paciente figura sólo con su seudónimo.
   - Las referencias son lógicas (por identificador `urn:asistente:*`), así que se pueden cargar en cualquier servidor FHIR sin que existan la paciente o la médica. También se incluyen en el Bundle de *Exportar a la HCE*, filtrados por la sesión actual.
 
 **Inyectar los logs en otro sistema:**
@@ -324,6 +331,7 @@ src/fhir.js            Bundle FHIR R4 + CDS Hooks
 src/terminologia.js    SNOMED CT y UCUM para el export
 src/trazabilidad.js    procedencia de cada respuesta y auditoría de cambios (Provenance / AuditEvent)
 src/logs.js            registro append-only en logs/ con hash encadenado
+src/seudonimo.js       seudónimo de la paciente y desidentificación de lo que va a logs/
 scripts/inyectar_fhir.js  envía logs/fhir a un servidor FHIR (npm run logs:fhir)
 src/seed.js            14 días de datos de ejemplo
 src/configuracion.js   acciones de la médica: importar la HCE, generar el asistente, alarmas

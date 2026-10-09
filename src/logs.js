@@ -2,13 +2,16 @@
 //
 // logs/
 //   auditoria.jsonl          cambios de configuración (quién, cuándo, antes y después)  ─┐ un registro por línea,
-//   procedencia.jsonl        origen de cada respuesta del asistente                      ─┘ encadenados por hash
+//   procedencia.jsonl        origen de cada respuesta del asistente                       │ encadenados por hash
+//   trazas.jsonl             paso a paso de cada evento (sin texto de la paciente)       ─┘
 //   fhir/AuditEvent.ndjson   los mismos registros como recursos FHIR R4 (NDJSON, formato Bulk Data)
 //   fhir/Provenance.ndjson
 //
 // Los archivos sólo se agregan (append-only): "Reiniciar" la demo no los borra. Cada registro lleva la sesión
 // de la demo en la que ocurrió. Cada línea de los .jsonl incluye el hash de la anterior (hashPrevio) y el suyo
 // (hash = sha256 del registro con hashPrevio): si alguien edita o borra una línea, la verificación lo detecta.
+// Nada de esto lleva datos personales de la paciente: src/trazabilidad.js seudonimiza cada registro antes de
+// escribirlo (src/seudonimo.js). Los logs no se descargan desde la app: salen sólo por scripts/inyectar_fhir.js.
 // La carpeta se puede cambiar con LOGS_DIR (los tests usan una temporal).
 const fs = require('fs');
 const path = require('path');
@@ -19,12 +22,13 @@ const GENESIS = '0'.repeat(64);
 const TIPOS = {
   auditoria: { archivo: 'auditoria.jsonl', fhir: 'AuditEvent' },
   procedencia: { archivo: 'procedencia.jsonl', fhir: 'Provenance' },
+  trazas: { archivo: 'trazas.jsonl', fhir: null },
 };
 const ultimoHash = {}; // tipo → hash de la última línea (se lee del archivo la primera vez)
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const archivo = (tipo) => path.join(DIR, TIPOS[tipo].archivo);
-const archivoFhir = (tipo) => path.join(DIR, 'fhir', `${TIPOS[tipo].fhir}.ndjson`);
+const archivoFhir = (tipo) => (TIPOS[tipo].fhir ? path.join(DIR, 'fhir', `${TIPOS[tipo].fhir}.ndjson`) : null);
 
 function lineas(file) {
   try {
@@ -58,7 +62,7 @@ function agregar(tipo, registro, aFhir) {
   const cuerpo = { ...registro, hashPrevio: hashAnterior(tipo) };
   const final = { ...cuerpo, hash: sha256(JSON.stringify(cuerpo)) };
   fs.appendFileSync(archivo(tipo), `${JSON.stringify(final)}\n`, 'utf8');
-  if (aFhir) fs.appendFileSync(archivoFhir(tipo), `${JSON.stringify(aFhir(final))}\n`, 'utf8');
+  if (aFhir && archivoFhir(tipo)) fs.appendFileSync(archivoFhir(tipo), `${JSON.stringify(aFhir(final))}\n`, 'utf8');
   ultimoHash[tipo] = final.hash;
   return final;
 }
@@ -79,6 +83,7 @@ function leer(tipo, { sesion = null, limite = 500 } = {}) {
 /** Lee los recursos FHIR de un tipo (en orden de registro). */
 function leerFhir(tipo, { sesion = null } = {}) {
   const ids = sesion ? new Set(leer(tipo, { sesion, limite: Infinity }).map((r) => r.id)) : null;
+  if (!archivoFhir(tipo)) return [];
   return lineas(archivoFhir(tipo))
     .map((l) => {
       try {
@@ -111,24 +116,19 @@ function verificar(tipo) {
 
 function archivos() {
   const info = (f) => {
+    const ruta = path.relative(path.join(__dirname, '..'), f).replace(/\\/g, '/');
     try {
-      const s = fs.statSync(f);
-      return { ruta: path.relative(path.join(__dirname, '..'), f).replace(/\\/g, '/'), bytes: s.size };
+      return { ruta, bytes: fs.statSync(f).size };
     } catch {
-      return { ruta: path.relative(path.join(__dirname, '..'), f).replace(/\\/g, '/'), bytes: 0 };
+      return { ruta, bytes: 0 };
     }
   };
-  return Object.fromEntries(Object.keys(TIPOS).flatMap((t) => [[t, info(archivo(t))], [TIPOS[t].fhir, info(archivoFhir(t))]]));
-}
-
-/** Ruta de un archivo de logs por nombre público (para descargarlo), o null si no es uno de los permitidos. */
-function rutaDescarga(nombre) {
-  const mapa = {};
+  const out = {};
   for (const t of Object.keys(TIPOS)) {
-    mapa[TIPOS[t].archivo] = archivo(t);
-    mapa[`${TIPOS[t].fhir}.ndjson`] = archivoFhir(t);
+    out[t] = info(archivo(t));
+    if (archivoFhir(t)) out[TIPOS[t].fhir] = info(archivoFhir(t));
   }
-  return mapa[nombre] || null;
+  return out;
 }
 
-module.exports = { agregar, leer, leerFhir, verificar, archivos, rutaDescarga, sha256, DIR, GENESIS, TIPOS };
+module.exports = { agregar, leer, leerFhir, verificar, archivos, sha256, DIR, GENESIS, TIPOS };

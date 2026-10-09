@@ -15,6 +15,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const S = require('./state');
 const M = require('./modulos');
 const LOGS = require('./logs');
+const SEUD = require('./seudonimo');
 const { uid } = require('./util');
 
 const RAIZ = path.join(__dirname, '..');
@@ -80,12 +81,18 @@ function actor() {
   return actorALS.getStore() || ACTORES.sistema;
 }
 
+// Nada personal de la paciente llega a logs/: cada registro pasa por la seudonimización antes de escribirse
+function agregarSeudonimizado(tipo, reg, aFhir) {
+  const limpio = SEUD.desidentificar(reg);
+  return LOGS.agregar(tipo, limpio, aFhir ? (r) => SEUD.desidentificar(aFhir(r)) : null);
+}
+
 // ---------------- Interacciones de la paciente ----------------
 const interALS = new AsyncLocalStorage();
 
 /** Ejecuta fn dentro de un contexto de interacción y, al terminar, registra la procedencia de las respuestas. */
 async function enInteraccion(tipo, fn) {
-  const ctx = { tipo, versiones: versiones(), llamadas: [], rag: [], contexto: [], guardrails: [], evidencia: [], mensajes: [], salidas: [], derivaciones: [], alertas: [], observaciones: [] };
+  const ctx = { id: uid('prov'), tipo, versiones: versiones(), llamadas: [], rag: [], contexto: [], guardrails: [], evidencia: [], mensajes: [], salidas: [], derivaciones: [], alertas: [], observaciones: [] };
   try {
     return await interALS.run(ctx, fn);
   } finally {
@@ -119,7 +126,7 @@ function registrarProcedencia(ctx) {
   const citados = [...new Set(respuestas.flatMap((m) => (m.sources || []).map((s) => s.id)))];
   const llm = require('./llm');
   const reg = {
-    id: uid('prov'),
+    id: ctx.id,
     tipo: 'procedencia',
     sesion: st.sesion,
     ts: st.clock,
@@ -151,7 +158,7 @@ function registrarProcedencia(ctx) {
       citados,
     },
   };
-  const final = LOGS.agregar('procedencia', reg, aProvenance);
+  const final = agregarSeudonimizado('procedencia', reg, aProvenance);
   for (const m of ctx.mensajes) if (m.from === 'asistente') m.procedencia = final.id;
   for (const s of ctx.salidas) {
     const sum = st.summaries.find((x) => x.id === s.id);
@@ -160,6 +167,26 @@ function registrarProcedencia(ctx) {
   S.save();
   return final;
 }
+
+// ---------------- Trazas (historial del paso a paso) ----------------
+// Cada S.trace se guarda también en logs/trazas.jsonl, sin el texto de la paciente (lo que va entre comillas)
+// ni sus datos personales. Si ocurre dentro de una interacción, queda vinculada a su procedencia.
+function registrarTraza(t, sesion) {
+  const ctx = interALS.getStore();
+  const reg = {
+    id: uid('trz'),
+    tipo: 'traza',
+    sesion,
+    ts: t.ts,
+    registrado: new Date(t.real).toISOString(),
+    actor: actor(),
+    interaccion: ctx ? ctx.id : null,
+    evento: SEUD.sinTextoDePaciente(t.evento),
+    pasos: (t.pasos || []).map((p) => ({ paso: SEUD.sinTextoDePaciente(p.paso), detalle: SEUD.sinTextoDePaciente(p.detalle == null ? '' : p.detalle) })),
+  };
+  return agregarSeudonimizado('trazas', reg, null);
+}
+S.onTrace(registrarTraza);
 
 // ---------------- Auditoría de cambios ----------------
 /** Diferencias campo por campo entre dos valores (recorre objetos; listas y valores simples se comparan enteros). */
@@ -187,6 +214,7 @@ function auditar(e) {
     ts: st.clock,
     registrado: new Date().toISOString(),
     accion: e.accion,
+    categoria: e.categoria || (e.accion === 'R' ? 'consulta' : 'cambio'), // cambio | consulta | exportacion
     evento: e.evento,
     actor: actor(),
     objeto: e.objeto,
@@ -201,12 +229,12 @@ function auditar(e) {
     despues: e.despues === undefined ? null : e.despues,
     app: APP,
   };
-  return LOGS.agregar('auditoria', reg, aAuditEvent);
+  return agregarSeudonimizado('auditoria', reg, aAuditEvent);
 }
 
 // ---------------- FHIR R4 ----------------
 const ref = (sistema, valor, display) => ({ identifier: { system: SYS(sistema), value: String(valor) }, ...(display ? { display } : {}) });
-const PACIENTE = ref('paciente', 'marta-001', 'Marta González');
+const PACIENTE = () => ref('paciente', SEUD.seudonimo()); // sólo el seudónimo: sin nombre ni id de la HCE
 const MEDICA = ref('usuario', 'lucia-001', 'Dra. Lucía Fernández');
 const SOFTWARE = (app) => ref('software', app.nombre, `Asistente de seguimiento ${app.version}${app.commit ? ` (${app.commit})` : ''}`);
 const meta = (r) => ({ tag: [{ system: SYS('sesion'), code: r.sesion }] });
@@ -246,7 +274,7 @@ function aProvenance(r) {
   };
 }
 
-const SUBTIPO = { C: 'create', U: 'update', D: 'delete', E: 'operation' };
+const SUBTIPO = { C: 'create', R: 'read', U: 'update', D: 'delete', E: 'operation' };
 
 function aAuditEvent(r) {
   const persona = r.actor.tipo === 'persona';
@@ -261,8 +289,10 @@ function aAuditEvent(r) {
     id: r.id,
     meta: meta(r),
     extension: extHash(r),
-    type: { system: 'http://terminology.hl7.org/CodeSystem/audit-event-type', code: 'rest', display: 'Restful Operation' },
-    subtype: [{ system: 'http://hl7.org/fhir/restful-interaction', code: SUBTIPO[r.accion] }],
+    // una exportación de datos de la paciente es el evento DICOM "Export"; el resto, operaciones REST
+    ...(r.categoria === 'exportacion'
+      ? { type: { system: 'http://dicom.nema.org/resources/ontology/DCM', code: '110106', display: 'Export' } }
+      : { type: { system: 'http://terminology.hl7.org/CodeSystem/audit-event-type', code: 'rest', display: 'Restful Operation' }, subtype: [{ system: 'http://hl7.org/fhir/restful-interaction', code: SUBTIPO[r.accion] }] }),
     action: r.accion,
     period: { start: new Date(r.ts).toISOString() },
     recorded: r.registrado,
@@ -290,7 +320,7 @@ function aAuditEvent(r) {
         ...(detalle.length ? { detail: detalle } : {}),
       },
       {
-        what: PACIENTE,
+        what: PACIENTE(),
         type: { system: 'http://terminology.hl7.org/CodeSystem/audit-entity-type', code: '1', display: 'Person' },
         role: { system: 'http://terminology.hl7.org/CodeSystem/object-role', code: '1', display: 'Patient' },
       },

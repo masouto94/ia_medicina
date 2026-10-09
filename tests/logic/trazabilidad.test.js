@@ -109,7 +109,8 @@ test('auditoría y procedencia por la API (modo simulado)', async (t) => {
     const [p] = (await api('/api/auditoria')).procedencia;
     assert.equal(resp.procedencia, p.id, 'el mensaje apunta a su procedencia');
     assert.deepEqual(p.respuestas.map((r) => r.id), [resp.id]);
-    assert.equal(p.actor.id, 'marta-001');
+    assert.match(p.actor.id, /^pac-[0-9a-f]{16}$/, 'la paciente figura con su seudónimo');
+    assert.equal(p.actor.id, (await api('/api/auditoria')).seudonimo);
     assert.equal(p.versiones.configuracion.version, s.assistant.version);
     assert.deepEqual(p.versiones.modulos.map((m) => `${m.id}@${m.version}`).sort(), ['dm2@1.2.0', 'hta@1.2.0']);
     assert.ok(p.versiones.alarmasGenericas);
@@ -154,9 +155,75 @@ test('auditoría y procedencia por la API (modo simulado)', async (t) => {
     const n = (tipo) => b.entry.filter((e) => e.resource.resourceType === tipo).length;
     assert.equal(n('Provenance'), provFhir.filter((r) => r.meta.tag[0].code === sesion).length);
     assert.equal(n('AuditEvent'), audFhir.filter((r) => r.meta.tag[0].code === sesion).length);
-    const r = await fetch(`${srv.base}/api/logs/AuditEvent.ndjson`);
-    assert.match(r.headers.get('content-type'), /fhir\+ndjson/);
-    assert.equal((await fetch(`${srv.base}/api/logs/..%2Fstate.json`)).status, 404);
+  });
+
+  await t.test('los datos identificados no se descargan: se ven (auditado) o se envían a la HCE (auditado)', async () => {
+    assert.equal((await fetch(`${srv.base}/api/logs/auditoria.jsonl`)).status, 404, 'los logs no se descargan desde la app');
+    assert.equal((await fetch(`${srv.base}/api/fhir/bundle?download=1`)).headers.get('content-disposition'), null);
+    const resumen = await api('/api/fhir/resumen');
+    assert.ok(resumen.recursos.Patient >= 1);
+    assert.doesNotMatch(JSON.stringify(resumen), /Marta|Gonz/, 'el resumen de la pestaña no lleva datos de la paciente');
+
+    const antes = (await api('/api/auditoria')).auditoria.length;
+    await api('/api/fhir/bundle');
+    await api('/api/hce/bundle');
+    await api('/cds-services/seguimiento-entre-consultas', { body: { hook: 'patient-view' } });
+    const exp = await api('/api/hce/export', { body: {} });
+    const nuevos = (await api('/api/auditoria')).auditoria.slice(0, 4).reverse();
+    assert.equal((await api('/api/auditoria')).auditoria.length, antes + 4);
+    assert.deepEqual(nuevos.map((r) => [r.accion, r.categoria, r.evento]), [
+      ['R', 'consulta', 'Bundle FHIR consultado'],
+      ['R', 'consulta', 'Datos de la HCE consultados'],
+      ['R', 'consulta', 'Registro consultado vía CDS Hooks (patient-view)'],
+      ['E', 'exportacion', 'Bundle enviado a la HCE'],
+    ]);
+    assert.ok(nuevos.every((r) => r.actor.id === 'lucia-001'));
+    assert.match(nuevos[3].detalle, new RegExp(`${exp.total} recursos`));
+    assert.equal((await api('/api/state')).exportaciones.length, 1);
+    const audFhir = leerJsonl(path.join(logsDir, 'fhir', 'AuditEvent.ndjson'));
+    const envio = audFhir.find((a) => a.outcomeDesc === 'Bundle enviado a la HCE');
+    assert.deepEqual(envio.type, { system: 'http://dicom.nema.org/resources/ontology/DCM', code: '110106', display: 'Export' });
+    assert.equal(envio.action, 'E');
+    assert.equal(audFhir.find((a) => a.outcomeDesc === 'Bundle FHIR consultado').subtype[0].code, 'read');
+  });
+
+  await t.test('logs/ sin datos personales: sólo un seudónimo estable de la paciente', async () => {
+    await api('/api/chat/text', { body: { text: 'Soy Marta González, DNI 14.XXX.XXX, tel +54 9 11 5555-0000: me duele mucho la rodilla' } });
+    const { seudonimo } = await api('/api/auditoria');
+    const archivos = ['auditoria.jsonl', 'procedencia.jsonl', 'trazas.jsonl', 'fhir/AuditEvent.ndjson', 'fhir/Provenance.ndjson'];
+    for (const f of archivos) {
+      const txt = fs.readFileSync(path.join(logsDir, f), 'utf8');
+      for (const dato of ['Marta', 'MARTA', 'marta', 'González', 'Gonzalez', 'marta-001', '14.XXX.XXX', '5555-0000', '1964-03-12', 'rodilla']) assert.ok(!txt.includes(dato), `${f} contiene "${dato}"`);
+      assert.ok(txt.includes(seudonimo), `${f} relaciona los registros con el seudónimo`);
+    }
+    const audFhir = leerJsonl(path.join(logsDir, 'fhir', 'AuditEvent.ndjson'));
+    const pac = audFhir.at(-1).entity.find((e) => e.role && e.role.code === '1');
+    assert.deepEqual(pac.what, { identifier: { system: 'urn:asistente:paciente', value: seudonimo } }, 'sin nombre (display), sólo el seudónimo');
+    const gen = leerJsonl(path.join(logsDir, 'auditoria.jsonl')).find((r) => r.evento === 'Asistente generado');
+    assert.deepEqual(gen.despues.paciente, { seudonimo }, 'la configuración guardada no lleva los datos de la paciente');
+    assert.ok(gen.despues.medicacion.length > 0, 'los valores clínicos de la configuración sí quedan (para auditar los cambios)');
+  });
+
+  await t.test('el seudónimo es estable con la misma clave y distinto con otra (re-identificable sólo desde el sistema)', () => {
+    const calc = (clave) => spawnSync(process.execPath, ['-e', `process.stdout.write(require(${JSON.stringify(path.join(RAIZ, 'src', 'seudonimo'))}).seudonimo('marta-001'))`], { env: { ...process.env, LOGS_SEUDONIMO_CLAVE: clave, DATA_DIR: srv.dataDir }, encoding: 'utf8' }).stdout;
+    assert.equal(calc('clave-a'), calc('clave-a'));
+    assert.notEqual(calc('clave-a'), calc('clave-b'));
+    assert.match(calc('clave-a'), /^pac-[0-9a-f]{16}$/);
+  });
+
+  await t.test('historial de trazas: sin texto de la paciente y vinculado a la procedencia', async () => {
+    const { trazas, integridad } = await api('/api/trazas');
+    assert.equal(integridad.ok, true);
+    const t = trazas.find((x) => /^Mensaje de pac-/.test(x.evento));
+    assert.ok(t, 'la traza del mensaje existe');
+    assert.match(t.evento, /"\[texto\]"/);
+    const prov = (await api('/api/auditoria')).procedencia.map((p) => p.id);
+    assert.ok(prov.includes(t.interaccion), 'la traza apunta a la procedencia de su respuesta');
+    assert.ok(trazas.some((x) => x.evento === 'Exportación a la HCE'));
+    const deriv = trazas.flatMap((x) => x.pasos).find((x) => x.paso === 'Módulo de derivación');
+    if (deriv) assert.match(deriv.detalle, /"\[texto\]"/, 'el motivo redactado a partir del mensaje no queda en el historial');
+    const clasif = trazas.flatMap((x) => x.pasos).find((x) => /^Intención:/.test(x.detalle));
+    assert.match(clasif.detalle, /tema: "\[texto\]"/, 'el tema que arma el modelo con palabras de la paciente tampoco');
   });
 
   await t.test('archivo, respuesta a un recordatorio y resumen preconsulta también tienen procedencia', async () => {
@@ -198,6 +265,7 @@ test('auditoría y procedencia por la API (modo simulado)', async (t) => {
     assert.notEqual(a.sesion, sesion);
     assert.ok(a.auditoria.some((r) => r.evento === 'Demo reiniciada' && r.sesion === sesion), 'el reinicio queda en la sesión que termina');
     assert.ok(a.procedencia.length >= 2, 'la procedencia de la sesión anterior sigue');
+    assert.ok((await api('/api/trazas?alcance=todo')).trazas.some((x) => x.sesion === sesion), 'las trazas de la sesión anterior siguen');
     assert.equal((await api('/api/auditoria')).auditoria.length, 0, 'la sesión nueva arranca vacía');
     assert.equal(a.integridad.auditoria.ok, true);
   });

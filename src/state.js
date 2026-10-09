@@ -31,6 +31,7 @@ function fresh() {
     media: [],
     summaries: [],
     evidenceQueries: [],
+    exportaciones: [], // envíos a la HCE (la única salida de datos identificados)
     traces: [],
   };
 }
@@ -67,9 +68,23 @@ function reset() {
 }
 
 // Registro de trazas internas del pipeline (para mostrar "cómo piensa" el sistema)
+// El estado guarda las últimas 80 de la sesión (con texto, para el panel); el historial completo va a
+// logs/trazas.jsonl sin datos de la paciente (lo registra src/trazabilidad.js con onTrace).
+let alTrazar = null;
+function onTrace(fn) {
+  alTrazar = fn;
+}
 function trace(evento, pasos) {
-  state.traces.unshift({ ts: state.clock, real: Date.now(), evento, pasos });
+  const t = { ts: state.clock, real: Date.now(), evento, pasos };
+  state.traces.unshift(t);
   state.traces = state.traces.slice(0, 80);
+  if (alTrazar) {
+    try {
+      alTrazar(t, state.sesion);
+    } catch (e) {
+      console.error('No se pudo registrar la traza:', e);
+    }
+  }
 }
 
-module.exports = { get, save, reset, trace, UPLOADS_DIR, INICIO };
+module.exports = { get, save, reset, trace, onTrace, UPLOADS_DIR, INICIO };

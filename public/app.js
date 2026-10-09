@@ -123,7 +123,7 @@ function renderStepper() {
     { n: 2, t: 'Configurar el asistente', done: !!S.assistant, tab: 'config' },
     { n: 3, t: 'Seguimiento por WhatsApp', done: hasMsgs, tab: null },
     { n: 4, t: 'Panel y resumen preconsulta', done: S.summaries.length > 0, tab: 'panel' },
-    { n: 5, t: 'Exportar a la HCE (FHIR)', done: !!window.__exported, tab: 'fhir' },
+    { n: 5, t: 'Exportar a la HCE (FHIR)', done: !!(S.exportaciones && S.exportaciones.length), tab: 'fhir' },
   ];
   const cur = steps.find((s) => !s.done);
   setHTML('stepper', steps.map((s) => `<div class="step ${s.done ? 'done' : ''} ${s === cur ? 'current' : ''}" data-goto="${s.tab || ''}"><b>${s.done ? '✓' : s.n}</b>${s.t}</div>`).join(''));
@@ -589,20 +589,22 @@ function renderEvidence() {
 let fhirCache = null;
 let cdsCache = null;
 function renderFhir() {
-  const counts = {};
-  const sig = JSON.stringify([S.messages.length, S.observations.length, S.doses.length, S.media.length, S.referrals.length, S.appointments.length, S.summaries.length, S.assistant && S.assistant.actualizado, S.referrals.filter((r) => r.estado !== 'pendiente').length]);
-  if (fhirCache && fhirCache.sig === sig) {
-    fhirCache.bundle.entry.forEach((e) => (counts[e.resource.resourceType] = (counts[e.resource.resourceType] || 0) + 1));
-  } else {
-    fhirCache = { sig, bundle: null };
-    api('/api/fhir/bundle').then((b) => {
-      fhirCache.bundle = b;
+  // la pestaña muestra sólo cantidades (sin datos de la paciente); el Bundle completo se ve a pedido y queda auditado
+  const sig = JSON.stringify([S.messages.length, S.observations.length, S.doses.length, S.media.length, S.referrals.length, S.appointments.length, S.summaries.length, S.assistant && S.assistant.actualizado, S.referrals.filter((r) => r.estado !== 'pendiente').length, (S.exportaciones || []).length]);
+  if (!fhirCache || fhirCache.sig !== sig) {
+    fhirCache = { sig, resumen: null };
+    api('/api/fhir/resumen').then((r) => {
+      fhirCache.resumen = r;
       rendered['tab-fhir'] = null;
       renderFhir();
     });
     return;
   }
-  if (!fhirCache.bundle) return;
+  if (!fhirCache.resumen) return;
+  const counts = fhirCache.resumen.recursos;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const exps = S.exportaciones || [];
+  const ultima = exps[exps.length - 1];
   const map = [
     ['Plan de cuidado y metas', ['CarePlan', 'Goal']],
     ['Medicación indicada', ['MedicationRequest']],
@@ -612,17 +614,20 @@ function renderFhir() {
     ['Consultas relevantes y derivaciones', ['Communication']],
     ['Turnos', ['Appointment']],
     ['Resumen del período', ['Composition']],
+    ['Trazabilidad y auditoría de la sesión', ['Provenance', 'AuditEvent']],
   ];
   setHTML('tab-fhir', `
     <div class="stack">
       <div class="section">
-        <h3>Exportación a la historia clínica (HL7 FHIR R4) <span class="hint">${fhirCache.bundle.entry.length} recursos</span></h3>
+        <h3>Exportación a la historia clínica (HL7 FHIR R4) <span class="hint">${total} recursos</span></h3>
         <table class="t"><tr><th>Información generada</th><th>Recurso FHIR</th><th class="num">Cantidad</th></tr>
         ${map.map(([l, rs]) => `<tr><td>${l}</td><td class="mono small">${rs.join(', ')}</td><td class="num">${rs.reduce((s, r) => s + (counts[r] || 0), 0)}</td></tr>`).join('')}</table>
-        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-          <a class="btn primary" href="/api/fhir/bundle?download=1">Descargar Bundle (JSON)</a>
-          <button class="btn" id="btnShowBundle">Ver Bundle</button>
-          <button class="btn" id="btnShowHce">Ver datos originales de la HCE</button>
+        <div class="callout" style="margin-top:10px">Los datos de la paciente no se descargan a archivos: salen del sistema sólo hacia la HCE. Cada envío y cada vista del Bundle completo quedan en la auditoría.</div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn primary" id="btnExportHce" ${S.assistant ? '' : 'disabled'}>Enviar a la HCE</button>
+          <button class="btn" id="btnShowBundle" title="Queda registrado en la auditoría">Ver Bundle</button>
+          <button class="btn" id="btnShowHce" title="Queda registrado en la auditoría">Ver datos originales de la HCE</button>
+          <span class="small muted">${ultima ? `Último envío: ${fDT(ultima.ts)} · ${ultima.total} recursos · ${exps.length} envío(s) en la sesión` : 'Todavía no se envió a la HCE'}</span>
         </div>
         <pre class="json" id="bundleView" style="display:none;margin-top:10px"></pre>
       </div>
@@ -644,11 +649,39 @@ function renderCds(r) {
 }
 
 // ================= Trazas =================
-function renderTraces() {
+let trazAlcance = 'sesion'; // sesion: las últimas 80 de esta sesión (en memoria, con texto) · historial: logs/trazas.jsonl
+let TRZ = null;
+let trzCargando = false;
+async function cargarTrazas() {
+  if (trzCargando) return;
+  trzCargando = true;
+  try {
+    TRZ = await api('/api/trazas?alcance=todo&limite=1000');
+  } catch {
+    TRZ = null;
+  }
+  trzCargando = false;
+  renderTraces(true);
+}
+
+function renderTraces(forzar = false) {
   const tr = S.traces;
+  const selector = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><select id="trzAlcance" class="sm"><option value="sesion" ${trazAlcance === 'sesion' ? 'selected' : ''}>Esta sesión (últimas 80)</option><option value="historial" ${trazAlcance === 'historial' ? 'selected' : ''}>Historial completo (logs/, sin datos de la paciente)</option></select>${trazAlcance === 'historial' && TRZ ? `<span class="pill ${TRZ.integridad.ok ? 'ok' : 'bad'}">${TRZ.integridad.ok ? '✓' : '✗'} trazas: ${TRZ.integridad.registros} registros</span>` : ''}</div>`;
+  const pasosHtml = (pasos) => `<ol>${pasos.map((p) => `<li><b>${esc(p.paso)}:</b> ${esc(p.detalle)}</li>`).join('')}</ol>`;
+  let cuerpo;
+  if (trazAlcance === 'historial') {
+    if (currentTab === 'trazas' && !forzar) cargarTrazas();
+    cuerpo = !TRZ
+      ? '<div class="empty">Cargando el historial…</div>'
+      : TRZ.trazas.length
+        ? TRZ.trazas.map((t) => `<div class="trace"><div class="ev">${esc(t.evento)} <span class="small muted">· ${fDT(t.ts)} · ${t.sesion === TRZ.sesion ? 'esta sesión' : `sesión ${esc(t.sesion)}`} · ${esc(t.actor.nombre)}${t.interaccion ? ` · <a class="provlink" data-prov="${t.interaccion}">procedencia</a>` : ''}</span></div>${pasosHtml(t.pasos)}</div>`).join('')
+        : '<div class="empty">Sin trazas registradas</div>';
+  } else {
+    cuerpo = tr.length ? tr.map((t) => `<div class="trace"><div class="ev">${esc(t.evento)} <span class="small muted">· ${fDT(t.ts)}</span></div>${pasosHtml(t.pasos)}</div>`).join('') : '<div class="empty">Sin eventos</div>';
+  }
   setHTML('tab-trazas', `
-    <div class="callout" style="margin-bottom:14px">Cada interacción muestra el recorrido por la arquitectura: filtro de seguridad → recuperación en la base especializada (RAG) → clasificación de intención con el modelo de lenguaje → módulos de servicio (registro, evidencia, derivación, turnos) → recursos FHIR.</div>
-    ${tr.length ? tr.map((t) => `<div class="trace"><div class="ev">${esc(t.evento)} <span class="small muted">· ${fDT(t.ts)}</span></div><ol>${t.pasos.map((p) => `<li><b>${esc(p.paso)}:</b> ${esc(p.detalle)}</li>`).join('')}</ol></div>`).join('') : '<div class="empty">Sin eventos</div>'}`);
+    <div class="callout" style="margin-bottom:14px">Cada interacción muestra el recorrido por la arquitectura: filtro de seguridad → recuperación en la base especializada (RAG) → clasificación de intención con el modelo de lenguaje → módulos de servicio (registro, evidencia, derivación, turnos) → recursos FHIR. El historial completo se guarda en <b>logs/trazas.jsonl</b> sin el texto ni los datos personales de la paciente.</div>
+    ${selector}${cuerpo}`);
   const last = tr[0];
   setHTML('lastTrace', last ? `<div class="role">Cómo lo procesó el sistema</div><div style="font-size:12.5px;font-weight:600;margin-top:2px">${esc(last.evento)}</div><ol>${last.pasos.map((p) => `<li><b>${esc(p.paso)}:</b> ${esc(p.detalle)}</li>`).join('')}</ol>` : '<div class="role">Cómo lo procesó el sistema</div><div class="small muted">Las trazas aparecen acá con cada interacción.</div>');
 }
@@ -938,7 +971,6 @@ function renderSim() {
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${corriendo ? '<button class="btn danger sm" id="btnPlanCancel">Cancelar</button>' : '<button class="btn sm" id="btnPlan3">Ejecutar otro plan…</button>'}
-        <a class="btn sm" href="/api/sim/plan?download=1" download>Descargar reporte JSON</a>
       </div>
     </div>
     <div class="progress"><div style="width:${j.total ? (100 * j.hechos) / j.total : 0}%"></div></div>
@@ -1028,7 +1060,7 @@ let AUD = null; // respuesta de /api/auditoria
 let audAlcance = 'sesion';
 let audCargando = false;
 let audResaltar = null;
-const ACCION = { C: 'Alta', U: 'Modificación', D: 'Baja', E: 'Acción' };
+const ACCION = { C: 'Alta', R: 'Consulta', U: 'Modificación', D: 'Baja', E: 'Acción' };
 const corto = (v) => {
   const s = typeof v === 'string' ? v : JSON.stringify(v);
   return s == null ? '—' : s.length > 90 ? `${s.slice(0, 87)}…` : s;
@@ -1060,13 +1092,12 @@ function renderAuditoria(forzar = false) {
   const msgs = new Map(S.messages.map((m) => [m.id, m]));
   const integ = (n, i) => `<span class="pill ${i.ok ? 'ok' : 'bad'}" title="${esc(i.error || 'Cadena de hashes verificada')}">${i.ok ? '✓' : '✗'} ${n}: ${i.registros} registros${i.ok ? '' : ` · línea ${i.linea}: ${esc(i.error)}`}</span>`;
   const v = AUD.versiones;
-  const descargas = ['auditoria.jsonl', 'procedencia.jsonl', 'AuditEvent.ndjson', 'Provenance.ndjson'].map((f) => `<a class="btn sm" href="/api/logs/${f}" download>${f}</a>`).join('');
   const filasAud = AUD.auditoria
     .map(
       (r) => `<tr>
       <td class="small">${fDT(r.ts)}<div class="muted" title="Fecha y hora reales del registro (el reloj de arriba es el simulado)">registrado ${esc(new Date(r.registrado).toLocaleString('es-AR', { hour12: false, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</div></td>
       <td class="small">${esc(r.actor.nombre)}<div class="muted">${esc(r.actor.origen || '')}</div></td>
-      <td class="small"><span class="pill">${ACCION[r.accion] || r.accion}</span><div>${esc(r.evento)}</div></td>
+      <td class="small"><span class="pill ${r.categoria === 'exportacion' ? 'bad' : ''}">${r.categoria === 'exportacion' ? 'Exportación' : ACCION[r.accion] || r.accion}</span><div>${esc(r.evento)}</div></td>
       <td class="small">${esc(r.objeto.nombre || r.objeto.id)}<div class="muted">${esc(r.objeto.tipo)} · ${esc(r.objeto.id)}</div></td>
       <td>${cambiosHtml(r)}</td>
       <td class="small num">${r.configuracion.versionAntes != null || r.configuracion.versionDespues != null ? `v${r.configuracion.versionAntes ?? '—'} → v${r.configuracion.versionDespues ?? '—'}` : '—'}</td>
@@ -1106,19 +1137,19 @@ function renderAuditoria(forzar = false) {
   setHTML(
     'tab-auditoria',
     `<div class="stack">
-    <div class="callout">Trazabilidad como software de uso médico. Cada <b>respuesta</b> del asistente queda asociada al modelo y la plantilla de prompt, las versiones de los módulos, la versión de la configuración de la médica y los fragmentos del RAG (<b>Provenance</b>). Cada <b>cambio de configuración</b> registra quién, cuándo y el valor antes y después (<b>AuditEvent</b>). Todo se guarda en la carpeta <b>logs/</b> del proyecto, fuera del estado de la demo: “Reiniciar” no lo borra.</div>
+    <div class="callout">Trazabilidad como software de uso médico. Cada <b>respuesta</b> del asistente queda asociada al modelo y la plantilla de prompt, las versiones de los módulos, la versión de la configuración de la médica y los fragmentos del RAG (<b>Provenance</b>). Cada <b>cambio de configuración</b> registra quién, cuándo y el valor antes y después (<b>AuditEvent</b>). También quedan las <b>consultas</b> de datos identificados (ver el Bundle, la HCE de origen, CDS Hooks) y cada <b>envío a la HCE</b>. Todo se guarda en la carpeta <b>logs/</b>, fuera del estado de la demo (“Reiniciar” no lo borra), <b>sin datos personales de la paciente</b>: figura con un seudónimo. Los logs no se descargan desde la app.</div>
     <div class="sim-head">
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        ${integ('auditoría', AUD.integridad.auditoria)} ${integ('procedencia', AUD.integridad.procedencia)}
+        ${integ('auditoría', AUD.integridad.auditoria)} ${integ('procedencia', AUD.integridad.procedencia)} ${integ('trazas', AUD.integridad.trazas)}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <select id="audAlcance" class="sm"><option value="sesion" ${audAlcance === 'sesion' ? 'selected' : ''}>Esta sesión</option><option value="todo" ${audAlcance === 'todo' ? 'selected' : ''}>Todas las sesiones</option></select>
-        ${descargas}
+        <span class="pill" title="Identificador de la paciente en logs/. Sólo el sistema, con su clave, puede relacionarlo con la persona.">Paciente en los logs: <b class="mono">${esc(AUD.seudonimo)}</b></span>
       </div>
     </div>
     <div class="small muted">Versión vigente: app ${esc(v.app.version)}${v.app.commit ? ` (${esc(v.app.commit)})` : ''} · ${v.modulos.map((m) => `${esc(m.id)} ${esc(m.version)}`).join(' · ') || 'sin módulos'} · alarmas genéricas ${esc(v.alarmasGenericas || '—')} · ${v.configuracion ? `configuración v${v.configuracion.version} (sha256 ${v.configuracion.sha256.slice(0, 12)})` : 'sin configuración'}</div>
     <div class="section" style="overflow-x:auto">
-      <h3>Cambios de configuración <span class="hint">AuditEvent · más recientes primero</span></h3>
+      <h3>Cambios, consultas y exportaciones <span class="hint">AuditEvent · más recientes primero</span></h3>
       ${filasAud ? `<table class="t audtbl"><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Objeto</th><th>Antes → después</th><th>Config.</th></tr>${filasAud}</table>` : '<div class="empty">Sin cambios registrados</div>'}
     </div>
     <div class="section" style="overflow-x:auto">
@@ -1247,10 +1278,10 @@ document.addEventListener('click', async (e) => {
     $('#evq').value = '';
     return act('/api/evidence', { pregunta: v });
   }
-  if (t.id === 'btnShowBundle') window.__exported = true;
+  if (t.id === 'btnExportHce') return act('/api/hce/export', {}, 'Bundle enviado a la HCE');
   if (t.id === 'btnShowBundle' || t.id === 'btnShowHce') {
     const pre = $('#bundleView');
-    const data = t.id === 'btnShowBundle' ? fhirCache.bundle : await api('/api/hce/bundle');
+    const data = await api(t.id === 'btnShowBundle' ? '/api/fhir/bundle' : '/api/hce/bundle'); // acceso auditado
     pre.textContent = JSON.stringify(data, null, 2);
     pre.style.display = 'block';
     return;
@@ -1295,6 +1326,12 @@ document.addEventListener('change', (e) => {
     renderAlarmas();
   }
   if (e.target.id === 'fileInput') chooseFile(e.target.files[0]);
+  if (e.target.id === 'trzAlcance') {
+    trazAlcance = e.target.value;
+    TRZ = null;
+    if (trazAlcance === 'historial') cargarTrazas();
+    else renderTraces();
+  }
   if (e.target.id === 'audAlcance') {
     audAlcance = e.target.value;
     cargarAuditoria();
@@ -1320,10 +1357,6 @@ document.addEventListener('keydown', (e) => {
   if (e.target.dataset && e.target.dataset.draft && e.target.dataset.draft.startsWith('rep-')) $(`[data-reply="${e.target.dataset.draft.slice(4)}"]`).click();
 });
 document.addEventListener('click', (e) => {
-  if (e.target.closest('a[href*="fhir/bundle"]')) {
-    window.__exported = true;
-    setTimeout(refresh, 300);
-  }
   if (!e.target.closest('#attachMenu') && !e.target.closest('#btnAttach')) $('#attachMenu').classList.remove('open');
   if (!e.target.closest('.simwrap')) $('#simMenu').classList.remove('open');
   if (e.target.id === 'planModal') cerrarPlanModal();

@@ -260,7 +260,7 @@ Un test que siempre pasa no prueba nada. Para confiar en ellos:
 
 ## 6. El reporte y las métricas
 
-La app (pestaña **Simulación**, botón *Descargar reporte JSON*) y la suite generative (`tests/resultados/generative-<fecha>.json`) calculan las mismas métricas con `src/evaluacion.js`:
+La app (pestaña **Simulación**; el reporte no se descarga porque las respuestas nombran a la paciente) y la suite generative (`tests/resultados/generative-<fecha>.json`) calculan las mismas métricas con `src/evaluacion.js`:
 
 ```json
 {

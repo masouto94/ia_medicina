@@ -222,10 +222,10 @@ async function procesarTexto(text, { via = 'texto', attachment = null } = {}) {
       });
       out = r.data;
       llm.setError(null);
-      pasos.push({ paso: `LLM (${llm.MODEL})`, detalle: `Intención: ${out.intencion} · tema: ${out.tema} · ${r.ms} ms` });
+      pasos.push({ paso: `LLM (${llm.MODEL})`, detalle: `Intención: ${out.intencion} · tema: "${out.tema}" · ${r.ms} ms` });
     } else {
       out = mockClassify(text, chunks, cfg);
-      pasos.push({ paso: 'Clasificador simulado (sin API key)', detalle: `Intención: ${out.intencion} · tema: ${out.tema}` });
+      pasos.push({ paso: 'Clasificador simulado (sin API key)', detalle: `Intención: ${out.intencion} · tema: "${out.tema}"` });
     }
   } catch (e) {
     llm.setError(e);
@@ -264,7 +264,7 @@ async function procesarTexto(text, { via = 'texto', attachment = null } = {}) {
   // 5) Evidencia (OpenEvidence mock) si la base especializada no alcanza
   if (out.requiere_evidencia) {
     const ev = OE.consultar(text);
-    T.anotar('evidencia', { servicio: 'OpenEvidence (mock)', consulta: ev.query_anonimizada, encontrado: ev.encontrado, tema: ev.tema || null, sugiereCambio: !!ev.sugiere_cambio_tratamiento, destino: ev.sugiere_cambio_tratamiento ? 'médica' : 'paciente (reformulada)' });
+    T.anotar('evidencia', { servicio: 'OpenEvidence (mock)', consultaSha256: T.sha(ev.query_anonimizada || ''), encontrado: ev.encontrado, tema: ev.tema || null, sugiereCambio: !!ev.sugiere_cambio_tratamiento, destino: ev.sugiere_cambio_tratamiento ? 'médica' : 'paciente (reformulada)' });
     st.evidenceQueries.unshift({ ...ev, ts: st.clock, origen: 'paciente (en segundo plano)', pregunta: ev.query_anonimizada });
     pasos.push({ paso: 'OpenEvidence (mock)', detalle: `Consulta anonimizada: "${ev.query_anonimizada}" → ${ev.encontrado ? ev.tema : 'sin resultado'}${ev.sugiere_cambio_tratamiento ? ' · SUGIERE CAMBIO DE TRATAMIENTO → a la médica' : ''}` });
     reply.evidence = { tema: ev.tema, citas: ev.citas.length, servicio: ev.servicio };
@@ -286,7 +286,7 @@ async function procesarTexto(text, { via = 'texto', attachment = null } = {}) {
   if (!out.requiere_evidencia && !out.sinEvidenciaEnSegundoPlano && out.derivar && out.derivar.necesario) {
     const ev = OE.consultar(text);
     if (ev.encontrado && ev.sugiere_cambio_tratamiento) {
-      T.anotar('evidencia', { servicio: 'OpenEvidence (mock)', consulta: ev.query_anonimizada, encontrado: true, tema: ev.tema || null, sugiereCambio: true, destino: 'médica (en segundo plano)' });
+      T.anotar('evidencia', { servicio: 'OpenEvidence (mock)', consultaSha256: T.sha(ev.query_anonimizada || ''), encontrado: true, tema: ev.tema || null, sugiereCambio: true, destino: 'médica (en segundo plano)' });
       st.evidenceQueries.unshift({ ...ev, ts: st.clock, origen: 'paciente (en segundo plano)', pregunta: ev.query_anonimizada });
       st.suggestions.push({ id: uid('sug'), ts: st.clock, estado: 'pendiente', origen: 'OpenEvidence (mock)', pregunta: text, tema: ev.tema, texto: ev.respuesta, citas: ev.citas });
       reply.evidence = { tema: ev.tema, citas: ev.citas.length, servicio: ev.servicio };
@@ -297,7 +297,7 @@ async function procesarTexto(text, { via = 'texto', attachment = null } = {}) {
   // 6) Derivación
   if (out.derivar && out.derivar.necesario) {
     const ref = C.addReferral({ motivo: out.derivar.motivo || out.tema, codigo: out.derivar.codigo || TERM.motivo(out.derivar.motivo_clave), resumen: out.derivar.resumen_para_medico || text, prioridad: out.derivar.prioridad || 'media', mensajeId: inMsg.id, texto: text });
-    pasos.push({ paso: 'Módulo de derivación', detalle: `Derivación ${ref.prioridad} a la médica: ${ref.motivo}` });
+    pasos.push({ paso: 'Módulo de derivación', detalle: `Derivación ${ref.prioridad} a la médica: "${ref.motivo}"${ref.codigo ? ` (SNOMED CT ${ref.codigo.code})` : ''}` });
     reply.referral = true;
   }
 
@@ -357,7 +357,7 @@ function applyRegistro(reg, pasos, sf) {
     const ds = C.registerDoseFromText(reg.tipo === 'toma_confirmada');
     pasos.push({ paso: 'Registro de adherencia', detalle: ds.length ? `MedicationStatement: ${ds.map((d) => `${d.nombre} ${fmtTime(d.programada)} → ${d.estado}`).join(', ')}` : 'No había tomas pendientes para asociar' });
   } else if (reg.tipo === 'sintoma') {
-    pasos.push({ paso: 'Registro', detalle: `Síntoma referido: ${reg.detalle || ''}` });
+    pasos.push({ paso: 'Registro', detalle: `Síntoma referido: "${reg.detalle || ''}"` });
   }
 }
 
