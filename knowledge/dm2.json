@@ -1,7 +1,199 @@
 {
   "id": "dm2",
   "nombre": "Diabetes mellitus tipo 2",
+  "version": "1.2.0",
+  "snomed": [
+    "44054006"
+  ],
   "fuente": "Adaptación educativa simplificada a partir de la Guía de Práctica Clínica Nacional sobre Prevención, Diagnóstico y Tratamiento de la DM2 (Ministerio de Salud, Res. 3877/2023). Contenido de demostración: debe ser validado por el equipo de salud.",
+  "configuracion": {
+    "descripcion": "Configuración por defecto del módulo. La médica la ajusta por paciente desde el panel.",
+    "variables": {
+      "glucemia": {
+        "etiqueta": "Glucemia",
+        "unidad": "mg/dl",
+        "ucum": "mg/dL",
+        "loinc": "2339-0"
+      },
+      "hba1c": {
+        "etiqueta": "HbA1c",
+        "unidad": "%",
+        "ucum": "%",
+        "loinc": "4548-4"
+      }
+    },
+    "metas": [
+      {
+        "clave": "ayunasMin",
+        "etiqueta": "Glucemia en ayunas mín",
+        "unidad": "mg/dl",
+        "valor": 80,
+        "variable": "glucemia",
+        "limite": "min"
+      },
+      {
+        "clave": "ayunasMax",
+        "etiqueta": "Glucemia en ayunas máx",
+        "unidad": "mg/dl",
+        "valor": 130,
+        "variable": "glucemia",
+        "limite": "max"
+      },
+      {
+        "clave": "posprandialMax",
+        "etiqueta": "Glucemia posprandial máx",
+        "unidad": "mg/dl",
+        "valor": 180
+      },
+      {
+        "clave": "hba1c",
+        "etiqueta": "HbA1c <",
+        "unidad": "%",
+        "valor": 7,
+        "step": 0.1,
+        "variable": "hba1c",
+        "limite": "max"
+      }
+    ],
+    "umbrales": [
+      {
+        "clave": "hipo",
+        "etiqueta": "Hipoglucemia <",
+        "unidad": "mg/dl",
+        "valor": 70
+      },
+      {
+        "clave": "hipoGrave",
+        "etiqueta": "Hipoglucemia grave <",
+        "unidad": "mg/dl",
+        "valor": 54
+      },
+      {
+        "clave": "hiper",
+        "etiqueta": "Glucemia alta >",
+        "unidad": "mg/dl",
+        "valor": 250
+      },
+      {
+        "clave": "hiperGrave",
+        "etiqueta": "Glucemia marcada >",
+        "unidad": "mg/dl",
+        "valor": 300
+      }
+    ],
+    "alertas": [
+      {
+        "id": "dm2-alerta-hipo-grave",
+        "nombre": "Hipoglucemia grave",
+        "variable": "glucemia",
+        "operador": "<",
+        "umbralRef": "hipoGrave",
+        "nivel": "alta"
+      },
+      {
+        "id": "dm2-alerta-hipo",
+        "nombre": "Hipoglucemia",
+        "variable": "glucemia",
+        "operador": "<",
+        "umbralRef": "hipo",
+        "nivel": "media"
+      },
+      {
+        "id": "dm2-alerta-hiper-grave",
+        "nombre": "Hiperglucemia marcada",
+        "variable": "glucemia",
+        "operador": ">",
+        "umbralRef": "hiperGrave",
+        "nivel": "alta"
+      },
+      {
+        "id": "dm2-alerta-hiper",
+        "nombre": "Glucemia elevada",
+        "variable": "glucemia",
+        "operador": ">",
+        "umbralRef": "hiper",
+        "nivel": "media"
+      },
+      {
+        "id": "dm2-alerta-hba1c",
+        "nombre": "HbA1c por encima de la meta",
+        "variable": "hba1c",
+        "operador": ">",
+        "metaRef": "hba1c",
+        "nivel": "baja"
+      }
+    ],
+    "alarmas": [
+      {
+        "id": "dm2-hipo-grave",
+        "nombre": "Hipoglucemia grave",
+        "tipo": "umbral",
+        "variable": "glucemia",
+        "operador": "<",
+        "umbralRef": "hipoGrave",
+        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común).",
+        "snomed": {
+          "code": "302866003",
+          "display": "Hypoglycemia"
+        }
+      },
+      {
+        "id": "dm2-hipo-grave-referida",
+        "nombre": "Hipoglucemia grave referida",
+        "tipo": "texto",
+        "frases": [
+          "hipoglucemia grave",
+          "no reacciona",
+          "no se despierta"
+        ],
+        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común).",
+        "snomed": {
+          "code": "302866003",
+          "display": "Hypoglycemia"
+        }
+      },
+      {
+        "id": "dm2-hipo-signos",
+        "nombre": "Hipoglucemia con signos de gravedad",
+        "tipo": "umbral",
+        "variable": "glucemia",
+        "operador": "<",
+        "umbralRef": "hipo",
+        "sintomas": [
+          "muy mal",
+          "no puedo",
+          "confund",
+          "no me puedo levantar"
+        ],
+        "instruccion": "Si estás consciente y podés tragar, tomá ahora 15 g de azúcar (3 cucharaditas en agua o medio vaso de jugo común).",
+        "snomed": {
+          "code": "302866003",
+          "display": "Hypoglycemia"
+        }
+      },
+      {
+        "id": "dm2-hiper-sintomas",
+        "nombre": "Hiperglucemia con síntomas de alarma",
+        "tipo": "umbral",
+        "variable": "glucemia",
+        "operador": ">",
+        "umbralRef": "hiperGrave",
+        "sintomas": [
+          "vomit",
+          "somnolien",
+          "dormida",
+          "respir"
+        ],
+        "snomed": {
+          "code": "80394007",
+          "display": "Hyperglycemia"
+        }
+      }
+    ],
+    "instruccionesModelo": [
+      "Una hipoglucemia entre {umbrales.hipoGrave} y {umbrales.hipo} mg/dl con la paciente consciente y sin confusión NO es alarma: respondé con la regla de 15 del fragmento DM2-05, registrá el valor (el sistema avisa a la médica automáticamente) y pedile que vuelva a medir en 15 minutos."
+    ]
+  },
   "fragmentos": [
     {
       "id": "DM2-01",

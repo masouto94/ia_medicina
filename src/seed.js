@@ -79,7 +79,7 @@ function seed14() {
 
   conv(day(11, '19:30'), 'marta', 'A la noche siento hormigueo en los pies, ¿es normal?', { intent: 'derivacion', topic: 'síntoma nuevo' });
   conv(day(11, '19:30') + 20e3, 'asistente', 'Gracias por contarme. Esto prefiero que lo evalúe la Dra. Lucía: ya le pasé tu consulta con un resumen y te va a responder por acá. Mientras tanto, revisá tus pies todos los días y avisá si aparece una herida o cambio de color.', { intent: 'derivacion', topic: 'síntoma nuevo', sources: src('DM2-10'), referral: true });
-  st.referrals.push({ id: uid('der'), ts: day(11, '19:30'), estado: 'pendiente', prioridad: 'media', motivo: 'Síntoma nuevo: parestesias en pies', resumen: 'Marta refiere hormigueo nocturno en ambos pies desde hace unos días. Sin heridas referidas. DM2 de 7 años de evolución. Sugerido: evaluación de neuropatía en próxima consulta.', texto: 'A la noche siento hormigueo en los pies, ¿es normal?' });
+  st.referrals.push({ id: uid('der'), ts: day(11, '19:30'), estado: 'pendiente', prioridad: 'media', codigo: { code: '91019004', display: 'Paresthesia' }, motivo: 'Síntoma nuevo: parestesias en pies', resumen: 'Marta refiere hormigueo nocturno en ambos pies desde hace unos días. Sin heridas referidas. DM2 de 7 años de evolución. Sugerido: evaluación de neuropatía en próxima consulta.', texto: 'A la noche siento hormigueo en los pies, ¿es normal?' });
   topic('cuidado de los pies');
 
   const pregunta = '¿Me puedo pasar al Ozempic? Mi vecina bajó mucho de peso';
@@ -88,7 +88,7 @@ function seed14() {
   conv(day(12, '09:15') + 25e3, 'asistente', 'Entiendo tu interés. Hay otros medicamentos que en algunas personas se suman a la metformina, pero si te conviene o no lo decide tu médica según tu caso. Ya le pasé tu consulta a la Dra. Lucía. Mientras tanto, seguí con tu tratamiento actual sin cambios.', { intent: 'derivacion', topic: 'cambio de tratamiento', evidence: { tema: ev.tema, citas: ev.citas.length, servicio: ev.servicio }, referral: true });
   st.evidenceQueries.push({ ...ev, ts: day(12, '09:15'), origen: 'paciente (en segundo plano)', pregunta: ev.query_anonimizada });
   st.suggestions.push({ id: uid('sug'), ts: day(12, '09:15'), estado: 'pendiente', origen: 'OpenEvidence (mock)', pregunta, tema: ev.tema, texto: ev.respuesta, citas: ev.citas });
-  st.referrals.push({ id: uid('der'), ts: day(12, '09:15'), estado: 'pendiente', prioridad: 'media', motivo: 'Consulta sobre cambio de tratamiento (arGLP-1)', resumen: 'Marta pregunta por semaglutida (Ozempic) por referencia de una vecina. La evidencia recuperada sugiere evaluar intensificación con iSGLT2/arGLP-1 según riesgo CV (ver sugerencias).', texto: pregunta });
+  st.referrals.push({ id: uid('der'), ts: day(12, '09:15'), estado: 'pendiente', prioridad: 'media', codigo: { code: '182836005', display: 'Review of medication' }, motivo: 'Consulta sobre cambio de tratamiento (arGLP-1)', resumen: 'Marta pregunta por semaglutida (Ozempic) por referencia de una vecina. La evidencia recuperada sugiere evaluar intensificación con iSGLT2/arGLP-1 según riesgo CV (ver sugerencias).', texto: pregunta });
   topic('cambio de tratamiento');
 
   const slot = day(17, '11:30');

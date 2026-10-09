@@ -1,6 +1,8 @@
 // Lógica clínica de registro: observaciones, tomas, alertas, derivaciones, mensajes y métricas.
 const S = require('./state');
+const M = require('./modulos');
 const { uid, atLocalTime, localDayKey, fmtTime } = require('./util');
+const T = require('./trazabilidad');
 
 const LOINC = {
   glucemia: { code: '2339-0', display: 'Glucemia (capilar)' },
@@ -20,6 +22,7 @@ function addMessage(m) {
   const st = S.get();
   const msg = { id: uid('msg'), ts: st.clock, ...m };
   st.messages.push(msg);
+  T.anotar('mensajes', msg);
   return msg;
 }
 
@@ -28,6 +31,7 @@ function addObservation(o, { check = true } = {}) {
   const obs = { id: uid('obs'), ts: st.clock, ...o };
   obs.loinc = obs.loinc || (LOINC[obs.tipo] && LOINC[obs.tipo].code);
   st.observations.push(obs);
+  T.anotar('observaciones', obs);
   if (check) checkThresholds(obs);
   return obs;
 }
@@ -36,6 +40,7 @@ function addAlert(nivel, motivo, extra = {}) {
   const st = S.get();
   const a = { id: uid('alr'), ts: st.clock, nivel, motivo, ack: false, ...extra };
   st.alerts.push(a);
+  T.anotar('alertas', a);
   return a;
 }
 
@@ -43,6 +48,7 @@ function addReferral(r) {
   const st = S.get();
   const ref = { id: uid('der'), ts: st.clock, estado: 'pendiente', prioridad: 'media', ...r };
   st.referrals.push(ref);
+  T.anotar('derivaciones', ref);
   return ref;
 }
 
@@ -53,25 +59,13 @@ function addTopic(tema) {
   st.topics[k] = (st.topics[k] || 0) + 1;
 }
 
-// Controla umbrales configurados por la médica
+// Controla las alertas de los módulos activos con los umbrales y metas configurados por la médica
 function checkThresholds(obs) {
   const st = S.get();
   const cfg = st.assistant && st.assistant.config;
   if (!cfg) return;
-  const u = cfg.umbrales;
-  if (obs.tipo === 'glucemia') {
-    if (obs.valor < u.hipoGrave) addAlert('alta', `Hipoglucemia grave: ${obs.valor} mg/dl`, { obsId: obs.id });
-    else if (obs.valor < u.hipo) addAlert('media', `Hipoglucemia: ${obs.valor} mg/dl`, { obsId: obs.id });
-    else if (obs.valor > u.hiperGrave) addAlert('alta', `Hiperglucemia marcada: ${obs.valor} mg/dl`, { obsId: obs.id });
-    else if (obs.valor > u.hiper) addAlert('media', `Glucemia elevada: ${obs.valor} mg/dl`, { obsId: obs.id });
-  }
-  if (obs.tipo === 'presion') {
-    if (obs.valor >= u.paSisAlarma || obs.valor2 >= u.paDiaAlarma) addAlert('alta', `Presión muy elevada: ${obs.valor}/${obs.valor2} mmHg`, { obsId: obs.id });
-    else if (obs.valor >= u.paSis || obs.valor2 >= u.paDia) addAlert('baja', `Presión por encima de la meta: ${obs.valor}/${obs.valor2} mmHg`, { obsId: obs.id });
-  }
-  if (obs.tipo === 'hba1c' && obs.valor > cfg.metas.hba1c) {
-    addAlert('baja', `HbA1c ${obs.valor}% por encima de la meta (<${cfg.metas.hba1c}%)`, { obsId: obs.id });
-  }
+  const a = M.evaluarAlerta(obs, cfg);
+  if (a) addAlert(a.nivel, a.motivo, { obsId: obs.id, reglaId: a.reglaId });
 }
 
 // ---------- Tomas de medicación ----------

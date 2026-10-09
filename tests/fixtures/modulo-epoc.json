@@ -1,0 +1,24 @@
+{
+  "id": "epoc",
+  "nombre": "EPOC (módulo de prueba)",
+  "version": "0.1.0",
+  "snomed": ["13645005"],
+  "fuente": "Módulo ficticio para los tests: demuestra que una patología se agrega sólo con un JSON.",
+  "configuracion": {
+    "variables": { "spo2": { "etiqueta": "Saturación de O2", "unidad": "%", "ucum": "%", "loinc": "59408-5" } },
+    "metas": [{ "clave": "spo2Min", "etiqueta": "SpO2 >", "unidad": "%", "valor": 92, "variable": "spo2", "limite": "min" }],
+    "umbrales": [
+      { "clave": "spo2Alerta", "etiqueta": "SpO2 alerta <", "unidad": "%", "valor": 90 },
+      { "clave": "spo2Alarma", "etiqueta": "SpO2 alarma <", "unidad": "%", "valor": 88 }
+    ],
+    "alertas": [{ "id": "epoc-alerta-spo2", "nombre": "Saturación baja", "variable": "spo2", "operador": "<", "umbralRef": "spo2Alerta", "nivel": "media" }],
+    "alarmas": [
+      { "id": "epoc-labios", "nombre": "Cianosis", "tipo": "texto", "frases": ["labios morados", "labios azules"] },
+      { "id": "epoc-spo2", "nombre": "Saturación muy baja", "tipo": "umbral", "variable": "spo2", "operador": "<", "umbralRef": "spo2Alarma" }
+    ],
+    "instruccionesModelo": ["Si la paciente refiere más falta de aire que lo habitual pero sin signos de alarma, derivá a la médica con prioridad media."]
+  },
+  "fragmentos": [
+    { "id": "EPOC-01", "tema": "inhalador", "titulo": "Uso del inhalador", "palabras": "inhalador puf aerosol", "texto": "Agitá el inhalador antes de usarlo." }
+  ]
+}

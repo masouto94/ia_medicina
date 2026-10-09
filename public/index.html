@@ -9,7 +9,7 @@
 <body>
   <header class="top">
     <div class="brand">
-      <h1>Asistente IA de seguimiento entre consultas</h1>
+      <h1>ATIA</h1>
       <span>Caso: Marta González (DM2 + HTA) · Dra. Lucía Fernández</span>
     </div>
     <span id="engine" class="engine">…</span>
@@ -18,7 +18,13 @@
       <span id="clock" class="time">—</span>
       <button class="btn" id="btnNext" title="Avanza el reloj hasta la próxima toma y envía el recordatorio">⏭ Próxima toma</button>
       <button class="btn" id="btnHour" title="Avanza 1 hora">+1 h</button>
-      <button class="btn" id="btnSeed" title="Genera 14 días de seguimiento de ejemplo">Simular 14 días</button>
+      <div class="simwrap">
+        <button class="btn" id="btnSim" title="Escenario fijo de 14 días o un plan JSON con resultados esperados">Simular ▾</button>
+        <div class="simmenu" id="simMenu">
+          <button id="btnSeed"><b>Escenario fijo: 14 días de ejemplo</b><small>Genera mediciones, tomas y mensajes para ver el panel con datos.</small></button>
+          <button id="btnPlan"><b>Ejecutar un plan JSON…</b><small>Pasos de la paciente con el resultado esperado y reporte obtenido vs. esperado.</small></button>
+        </div>
+      </div>
       <button class="btn danger" id="btnReset">Reiniciar</button>
     </div>
   </header>
@@ -40,12 +46,16 @@
         <button class="tab" data-tab="evidencia">Evidencia</button>
         <button class="tab" data-tab="fhir">HCE · FHIR · CDS Hooks</button>
         <button class="tab" data-tab="trazas">Trazas del sistema</button>
+        <button class="tab" data-tab="sim">Simulación <span id="simBadge"></span></button>
+        <button class="tab" data-tab="auditoria">Auditoría</button>
       </div>
       <div class="tabpanel active" id="tab-config"></div>
       <div class="tabpanel" id="tab-panel"></div>
       <div class="tabpanel" id="tab-evidencia"></div>
       <div class="tabpanel" id="tab-fhir"></div>
       <div class="tabpanel" id="tab-trazas"></div>
+      <div class="tabpanel" id="tab-sim"></div>
+      <div class="tabpanel" id="tab-auditoria"></div>
     </section>
 
     <!-- ===================== Paciente ===================== -->
@@ -86,6 +96,28 @@
       <div class="lasttrace card" style="padding:10px 12px" id="lastTrace"></div>
     </aside>
   </main>
+  <div class="modal-bg" id="planModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Simular con un plan JSON</h3>
+        <button class="btn sm" id="planClose">✕</button>
+      </div>
+      <p class="small muted" style="margin:0 0 10px">Cada paso tiene un momento (<code>+30m</code>, <code>+2h</code>, <code>+1d</code>), un mensaje o archivo de la paciente y el resultado esperado. Al ejecutar, cada plan reinicia la demo y aplica su configuración. El formato está en <b>tests/README.md</b>.</p>
+      <h5 class="small muted" style="margin:0 0 6px">Planes de ejemplo (carpeta muestras/planes)</h5>
+      <div id="planEjemplos" class="plan-ejemplos"></div>
+      <div style="display:flex;margin:10px 0 6px;gap:8px;align-items:center">
+        <button class="btn sm" id="planFileBtn">Cargar archivo .json…</button>
+        <input type="file" id="planFile" accept=".json,application/json" hidden />
+        <span class="small muted" id="planNombre"></span>
+      </div>
+      <textarea id="planTxt" spellcheck="false" placeholder='{ "nombre": "Mi plan", "pasos": [ { "momento": "+1h", "mensaje": "Me duele el pecho", "esperado": { "alarma": true } } ] }'></textarea>
+      <div id="planVal" class="small" style="min-height:18px;margin-top:6px"></div>
+      <div class="modal-foot">
+        <button class="btn" id="planCancel">Cancelar</button>
+        <button class="btn primary" id="planRun" disabled>Ejecutar plan</button>
+      </div>
+    </div>
+  </div>
   <div class="toast" id="toast"></div>
   <script src="app.js"></script>
 </body>

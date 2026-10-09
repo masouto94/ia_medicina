@@ -2,7 +2,10 @@
 const S = require('./state');
 const C = require('./clinic');
 const hce = require('./mocks/hce');
+const M = require('./modulos');
+const TERM = require('./terminologia');
 const { fmtDateTime } = require('./util');
+const LOGS = require('./logs');
 
 const P = { reference: `Patient/${hce.PATIENT_ID}`, display: 'Marta González' };
 const DR = { reference: `Practitioner/${hce.PRACTITIONER_ID}`, display: 'Dra. Lucía Fernández' };
@@ -17,11 +20,25 @@ function bundle(baseUrl = 'http://localhost:3000') {
 
   const cfg = st.assistant && st.assistant.config;
   if (cfg) {
-    const goals = [
-      { id: 'goal-glu', text: `Glucemia en ayunas ${cfg.metas.ayunasMin}-${cfg.metas.ayunasMax} mg/dL`, loinc: '1558-6', low: cfg.metas.ayunasMin, high: cfg.metas.ayunasMax, unit: 'mg/dL' },
-      { id: 'goal-hba1c', text: `HbA1c < ${cfg.metas.hba1c}%`, loinc: '4548-4', high: cfg.metas.hba1c, unit: '%' },
-      { id: 'goal-pa', text: `Presión arterial < ${cfg.metas.paSis}/${cfg.metas.paDia} mmHg`, loinc: '85354-9' },
-    ];
+    // un Goal por variable con meta (según los módulos activos) y uno de texto para las metas sin variable
+    const goals = [];
+    for (const id of M.activos(cfg)) {
+      const mc = M.get(id).configuracion;
+      const porVar = {};
+      for (const m of mc.metas) {
+        if (!m.variable) {
+          goals.push({ id: `goal-${id}-${m.clave}`, text: `${m.etiqueta} ${cfg.metas[m.clave]} ${m.unidad}`.trim(), modulo: id });
+          continue;
+        }
+        porVar[m.variable] = porVar[m.variable] || { low: null, high: null };
+        porVar[m.variable][m.limite === 'min' ? 'low' : 'high'] = cfg.metas[m.clave];
+      }
+      for (const [v, r] of Object.entries(porVar)) {
+        const def = mc.variables[v] || {};
+        const rango = r.low != null && r.high != null ? `${r.low}–${r.high}` : r.high != null ? `< ${r.high}` : `> ${r.low}`;
+        goals.push({ id: `goal-${id}-${v}`, text: `${def.etiqueta || v} ${rango} ${def.unidad || ''}`.trim(), loinc: def.loinc, low: r.low, high: r.high, unit: def.ucum || def.unidad, modulo: id });
+      }
+    }
     for (const g of goals) {
       add({
         resourceType: 'Goal',
@@ -29,7 +46,8 @@ function bundle(baseUrl = 'http://localhost:3000') {
         lifecycleStatus: 'active',
         description: { text: g.text },
         subject: P,
-        target: g.unit ? [{ measure: { coding: [{ system: 'http://loinc.org', code: g.loinc }] }, detailRange: { low: g.low != null ? { value: g.low, unit: g.unit } : undefined, high: { value: g.high, unit: g.unit } } }] : undefined,
+        addresses: (M.get(g.modulo).snomed || []).map((c) => ({ display: `SNOMED CT ${c}` })),
+        target: g.loinc ? [{ measure: { coding: [{ system: 'http://loinc.org', code: g.loinc }] }, detailRange: { low: g.low != null ? TERM.cantidad(g.low, g.unit) : undefined, high: g.high != null ? TERM.cantidad(g.high, g.unit) : undefined } }] : undefined,
       });
     }
     add({
@@ -49,13 +67,16 @@ function bundle(baseUrl = 'http://localhost:3000') {
     });
   }
 
+  // la medicación de cada toma se codifica igual que la MedicationRequest de la HCE (SNOMED CT)
+  const medConcepto = {};
+  for (const r of src.filter((x) => x.resourceType === 'MedicationRequest')) medConcepto[r.id.replace(/^medreq-/, '')] = r.medicationCodeableConcept;
   for (const d of st.doses.filter((x) => x.estado !== 'pendiente')) {
     add({
       resourceType: 'MedicationStatement',
       id: d.id,
       status: d.estado === 'tomada' ? 'completed' : 'not-taken',
       statusReason: d.estado === 'sin_respuesta' ? [{ text: 'Sin confirmación de la paciente' }] : undefined,
-      medicationCodeableConcept: { text: d.nombre },
+      medicationCodeableConcept: medConcepto[d.medId] || { text: d.nombre },
       subject: P,
       effectiveDateTime: iso(d.programada),
       dateAsserted: d.respondida ? iso(d.respondida) : undefined,
@@ -80,10 +101,10 @@ function bundle(baseUrl = 'http://localhost:3000') {
     };
     if (o.tipo === 'presion') {
       r.component = [
-        { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Sistólica' }] }, valueQuantity: { value: o.valor, unit: 'mmHg' } },
-        { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastólica' }] }, valueQuantity: { value: o.valor2, unit: 'mmHg' } },
+        { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Sistólica' }] }, valueQuantity: TERM.cantidad(o.valor, 'mmHg') },
+        { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastólica' }] }, valueQuantity: TERM.cantidad(o.valor2, 'mmHg') },
       ];
-    } else r.valueQuantity = { value: o.valor, unit: o.unidad };
+    } else r.valueQuantity = TERM.cantidad(o.valor, o.unidad);
     add(r);
   }
 
@@ -100,8 +121,38 @@ function bundle(baseUrl = 'http://localhost:3000') {
   }
 
   for (const r of st.referrals) {
-    add({ resourceType: 'Communication', id: r.id, status: r.estado === 'pendiente' ? 'in-progress' : 'completed', category: [{ text: 'Derivación del asistente a la médica' }], priority: r.prioridad === 'alta' ? 'urgent' : 'routine', subject: P, sent: iso(r.ts), sender: { display: 'lucia-marta-assistant' }, recipient: [DR], reasonCode: [{ text: r.motivo }], payload: [{ contentString: r.resumen }] });
+    add({ resourceType: 'Communication', id: r.id, status: r.estado === 'pendiente' ? 'in-progress' : 'completed', category: [{ text: 'Derivación del asistente a la médica' }], priority: r.prioridad === 'alta' ? 'urgent' : 'routine', subject: P, sent: iso(r.ts), sender: { display: 'lucia-marta-assistant' }, recipient: [DR], reasonCode: [TERM.concepto(r.codigo || TERM.motivo('consulta'), r.motivo)], payload: [{ contentString: r.resumen }] });
     if (r.respuesta) add({ resourceType: 'Communication', id: `${r.id}-resp`, status: 'completed', inResponseTo: [{ reference: `Communication/${r.id}` }], subject: P, sent: iso(r.respondida), sender: DR, recipient: [P], payload: [{ contentString: r.respuesta }] });
+  }
+  // Sugerencias basadas en evidencia: lo que devolvió OpenEvidence (GuidanceResponse) y la decisión de la médica (Task)
+  const ESTADO_TASK = { pendiente: 'requested', aceptada: 'accepted', descartada: 'rejected' };
+  const NEGOCIO = { pendiente: 'Pendiente de revisión', aceptada: 'Evaluar en consulta', descartada: 'Descartada' };
+  for (const s of st.suggestions || []) {
+    add({
+      resourceType: 'GuidanceResponse',
+      id: `${s.id}-evidencia`,
+      moduleUri: 'urn:asistente:openevidence-mock',
+      status: 'success',
+      subject: P,
+      occurrenceDateTime: iso(s.ts),
+      performer: { display: s.origen },
+      reasonCode: [{ text: 'Consulta de la paciente que implica una posible decisión terapéutica' }],
+      note: [{ text: `${s.tema}. ${s.texto}` }, ...s.citas.map((c) => ({ text: `${c.ref}${c.url ? ` ${c.url}` : ''}` }))],
+    });
+    add({
+      resourceType: 'Task',
+      id: s.id,
+      status: ESTADO_TASK[s.estado] || 'requested',
+      businessStatus: { text: NEGOCIO[s.estado] || s.estado },
+      intent: 'proposal',
+      code: { text: 'Revisar sugerencia basada en evidencia' },
+      description: s.tema,
+      focus: { reference: `GuidanceResponse/${s.id}-evidencia` },
+      for: P,
+      authoredOn: iso(s.ts),
+      ...(s.resuelta ? { lastModified: iso(s.resuelta), executionPeriod: { end: iso(s.resuelta) } } : {}),
+      owner: DR,
+    });
   }
   for (const a of st.appointments) {
     add({ resourceType: 'Appointment', id: a.id, status: 'booked', start: iso(a.inicio), end: iso(a.inicio + 20 * 60e3), created: iso(a.ts), participant: [{ actor: P, status: 'accepted' }, { actor: DR, status: 'accepted' }], description: `Turno solicitado por el asistente – ${a.lugar}` });
@@ -109,6 +160,9 @@ function bundle(baseUrl = 'http://localhost:3000') {
   for (const s of st.summaries) {
     add({ resourceType: 'Composition', id: s.id, status: 'final', type: { text: 'Resumen preconsulta del período entre consultas' }, subject: P, date: iso(s.ts), author: [{ display: `lucia-marta-assistant (${s.motor})` }], title: 'Resumen preconsulta', section: [{ title: 'Resumen', text: { status: 'generated', div: `<div xmlns="http://www.w3.org/1999/xhtml"><pre>${escapeHtml(s.texto)}</pre></div>` } }] });
   }
+  // Trazabilidad de esta sesión (desde logs/): origen de cada respuesta y cambios de configuración
+  for (const r of LOGS.leerFhir('procedencia', { sesion: st.sesion })) add(r);
+  for (const r of LOGS.leerFhir('auditoria', { sesion: st.sesion })) add(r);
   return JSON.parse(JSON.stringify({ resourceType: 'Bundle', id: `export-${Date.now()}`, type: 'collection', timestamp: iso(st.clock), entry: entries }));
 }
 

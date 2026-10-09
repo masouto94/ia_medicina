@@ -1,0 +1,150 @@
+{
+  "descripcion": "Señales de alarma genéricas, comunes a cualquier paciente. Se pueden pausar y modificar desde el panel de la médica, pero no eliminar. Las frases se comparan sin tildes ni mayúsculas; una frase puede ser el comienzo de una palabra (p. ej. 'desmay' cubre 'desmayé').",
+  "version": "1.2.1",
+  "alarmas": [
+    {
+      "id": "gen-dolor-toracico",
+      "nombre": "Dolor torácico",
+      "tipo": "texto",
+      "frases": [
+        "dolor de pecho",
+        "dolor en el pecho",
+        "dolor en pecho",
+        "duele el pecho",
+        "duele en el pecho",
+        "dolor toracico",
+        "opresion en el pecho",
+        "presion en el pecho",
+        "me aprieta el pecho",
+        "duele mucho el pecho",
+        "dolor fuerte en el pecho",
+        "dolor muy fuerte en el pecho"
+      ],
+      "snomed": {
+        "code": "29857009",
+        "display": "Chest pain"
+      }
+    },
+    {
+      "id": "gen-disnea",
+      "nombre": "Dificultad respiratoria (disnea)",
+      "tipo": "texto",
+      "frases": [
+        "falta de aire",
+        "me falta el aire",
+        "no puedo respirar",
+        "me cuesta respirar",
+        "dificultad para respirar",
+        "me ahogo"
+      ],
+      "snomed": {
+        "code": "267036007",
+        "display": "Dyspnea"
+      }
+    },
+    {
+      "id": "gen-perdida-conocimiento",
+      "nombre": "Pérdida de conocimiento",
+      "tipo": "texto",
+      "frases": [
+        "desmay",
+        "perdi el conocimiento",
+        "perdio el conocimiento",
+        "me desvaneci"
+      ],
+      "snomed": {
+        "code": "419045004",
+        "display": "Loss of consciousness"
+      }
+    },
+    {
+      "id": "gen-convulsiones",
+      "nombre": "Convulsiones",
+      "tipo": "texto",
+      "frases": [
+        "convulsi"
+      ],
+      "snomed": {
+        "code": "91175000",
+        "display": "Seizure"
+      }
+    },
+    {
+      "id": "gen-acv",
+      "nombre": "Posible ACV (signo neurológico agudo)",
+      "tipo": "texto",
+      "frases": [
+        "no puedo hablar",
+        "cara torcida",
+        "boca torcida",
+        "se me paraliz",
+        "no puedo mover el brazo",
+        "no puedo mover la pierna",
+        "debilidad de un lado"
+      ],
+      "snomed": {
+        "code": "230690007",
+        "display": "Cerebrovascular accident"
+      }
+    },
+    {
+      "id": "gen-angioedema",
+      "nombre": "Posible angioedema",
+      "tipo": "texto",
+      "frases": [
+        "hinchazon de labios",
+        "hinchazon de lengua",
+        "hinchazon de cara",
+        "se me hincho la lengua",
+        "se me hincho la cara",
+        "se me hincho la boca",
+        "labios hinchados"
+      ],
+      "snomed": {
+        "code": "41291007",
+        "display": "Angioedema"
+      }
+    },
+    {
+      "id": "gen-confusion",
+      "nombre": "Confusión",
+      "tipo": "texto",
+      "frases": [
+        "confundid",
+        "confusion",
+        "no se donde estoy"
+      ],
+      "snomed": {
+        "code": "286933003",
+        "display": "Confusional state"
+      }
+    },
+    {
+      "id": "gen-hemorragia",
+      "nombre": "Hemorragia",
+      "tipo": "texto",
+      "frases": [
+        "hemorragia",
+        "sangrado abundante",
+        "sangro mucho",
+        "sangra mucho",
+        "no para de sangrar",
+        "no me para de sangrar",
+        "vomito con sangre",
+        "vomitos con sangre",
+        "vomite sangre",
+        "sangre en el vomito",
+        "tos con sangre",
+        "escupo sangre",
+        "heces negras",
+        "materia fecal negra",
+        "caca negra",
+        "orino sangre"
+      ],
+      "snomed": {
+        "code": "131148009",
+        "display": "Bleeding"
+      }
+    }
+  ]
+}

@@ -82,6 +82,9 @@ function render() {
   renderEvidence();
   renderFhir();
   renderTraces();
+  renderAlarmas();
+  renderSim();
+  renderAuditoria();
   renderChat();
 }
 
@@ -104,7 +107,11 @@ function renderHeader() {
   const has = !!S.assistant;
   $('#btnNext').disabled = !has;
   $('#btnHour').disabled = !has;
-  $('#btnSeed').disabled = !has || S.seeded;
+  const simCorriendo = !!(S.simulacion && S.simulacion.estado === 'corriendo');
+  $('#btnSeed').disabled = !has || S.seeded || simCorriendo;
+  $('#btnPlan').disabled = simCorriendo;
+  if (simCorriendo) $('#btnNext').disabled = $('#btnHour').disabled = true;
+  $('#btnReset').disabled = simCorriendo;
   const n = S.metrics ? S.metrics.alertasAbiertas + S.metrics.derivacionesPendientes : 0;
   $('#tabBadge').innerHTML = n ? `<span class="count">${n}</span>` : '';
 }
@@ -116,7 +123,7 @@ function renderStepper() {
     { n: 2, t: 'Configurar el asistente', done: !!S.assistant, tab: 'config' },
     { n: 3, t: 'Seguimiento por WhatsApp', done: hasMsgs, tab: null },
     { n: 4, t: 'Panel y resumen preconsulta', done: S.summaries.length > 0, tab: 'panel' },
-    { n: 5, t: 'Exportar a la HCE (FHIR)', done: !!window.__exported, tab: 'fhir' },
+    { n: 5, t: 'Exportar a la HCE (FHIR)', done: !!(S.exportaciones && S.exportaciones.length), tab: 'fhir' },
   ];
   const cur = steps.find((s) => !s.done);
   setHTML('stepper', steps.map((s) => `<div class="step ${s.done ? 'done' : ''} ${s === cur ? 'current' : ''}" data-goto="${s.tab || ''}"><b>${s.done ? '✓' : s.n}</b>${s.t}</div>`).join(''));
@@ -163,7 +170,9 @@ function renderConfig() {
       </div>
       ${cfg ? `<div class="callout">Asistente activo: <b class="mono">${esc(cfg.id)}</b> · creado ${fDT(S.assistant.creado)}. Podés modificar la configuración y guardarla: los cambios se aplican en el próximo mensaje (no hay reentrenamiento).</div>` : ''}
       <div id="cfgForm"></div>
+      <div id="alarmasBox"></div>
     </div>`;
+  delete rendered.alarmasBox;
   if (!configDraft || !S.assistant || configDraft._from !== S.assistant.actualizado) {
     loadDraft(cfg);
   } else {
@@ -182,6 +191,8 @@ function renderForm() {
   const c = configDraft;
   const box = $('#cfgForm');
   if (!box) return;
+  aplicarDefaultsModulos(c);
+  const modsActivos = CAT.modulos.filter((m) => m.disponible && c.modulos.includes(m.id));
   const num = (path, label, step = 1) => {
     const [g, k] = path.split('.');
     return `<label class="field">${label}<input type="number" step="${step}" data-cfg="${path}" value="${c[g][k]}"></label>`;
@@ -198,29 +209,22 @@ function renderForm() {
       </div>
       <div class="grid2">
         <div class="section">
-          <h3>Metas terapéuticas</h3>
-          <div class="inline-fields">
-            ${num('metas.ayunasMin', 'Ayunas mín (mg/dl)')}${num('metas.ayunasMax', 'Ayunas máx (mg/dl)')}
-            ${num('metas.posprandialMax', 'Posprandial máx')}${num('metas.hba1c', 'HbA1c < (%)', 0.1)}
-            ${num('metas.paSis', 'PA sistólica <')}${num('metas.paDia', 'PA diastólica <')}
-          </div>
+          <h3>Metas terapéuticas <span class="hint">por defecto, las del módulo</span></h3>
+          ${modsActivos.map((m) => `<div class="small muted" style="margin:6px 0 4px">${esc(m.nombre)}</div><div class="inline-fields">${m.configuracion.metas.map((x) => num(`metas.${x.clave}`, `${x.etiqueta}${x.unidad ? ` (${x.unidad})` : ''}`, x.step || 1)).join('')}</div>`).join('') || '<div class="muted small">Activá un módulo para ver sus metas.</div>'}
         </div>
         <div class="section">
-          <h3>Umbrales de alerta</h3>
-          <div class="inline-fields">
-            ${num('umbrales.hipo', 'Hipoglucemia <')}${num('umbrales.hipoGrave', 'Hipo grave (alarma) <')}
-            ${num('umbrales.hiper', 'Glucemia alta >')}${num('umbrales.hiperGrave', 'Glucemia marcada >')}
-            ${num('umbrales.paSisAlarma', 'PA sist. alarma ≥')}${num('umbrales.omisionesConsecutivas', 'Omisiones seguidas')}
-          </div>
+          <h3>Umbrales de alerta <span class="hint">avisos a la médica; las alarmas se configuran abajo</span></h3>
+          ${modsActivos.map((m) => `<div class="small muted" style="margin:6px 0 4px">${esc(m.nombre)}</div><div class="inline-fields">${m.configuracion.umbrales.map((x) => num(`umbrales.${x.clave}`, `${x.etiqueta}${x.unidad ? ` (${x.unidad})` : ''}`, x.step || 1)).join('')}</div>`).join('')}
+          <div class="small muted" style="margin:6px 0 4px">General</div><div class="inline-fields">${CAT.umbralesGenerales.map((x) => num(`umbrales.${x.clave}`, x.etiqueta)).join('')}</div>
         </div>
       </div>
       <div class="grid2">
         <div class="section">
           <h3>Bases especializadas (módulos por patología)</h3>
           <div class="checks" style="grid-template-columns:1fr">
-            ${CAT.modulos.map((m) => `<label class="check ${m.disponible ? '' : 'disabled'}"><input type="checkbox" data-mod="${m.id}" ${c.modulos.includes(m.id) ? 'checked' : ''} ${m.disponible ? '' : 'disabled'}> <span>${esc(m.nombre)}${m.disponible ? ` <span class="muted small">· ${m.fragmentos.length} fragmentos</span>` : ' <span class="muted small">(próximamente)</span>'}</span></label>`).join('')}
+            ${CAT.modulos.map((m) => `<label class="check ${m.disponible ? '' : 'disabled'}"><input type="checkbox" data-mod="${m.id}" ${c.modulos.includes(m.id) ? 'checked' : ''} ${m.disponible ? '' : 'disabled'}> <span>${esc(m.nombre)}${m.disponible ? ` <span class="muted small">· v${esc(m.version)} · ${m.fragmentos.length} fragmentos · ${m.configuracion.metas.length} metas · ${m.configuracion.umbrales.length} umbrales · ${m.configuracion.alarmas.length} alarmas</span>` : ' <span class="muted small">(próximamente)</span>'}</span></label>`).join('')}
           </div>
-          <p class="small muted" style="margin:8px 0 0">Contenido educativo basado en guías nacionales y validado por el equipo de salud. Combinables en multimorbilidad.</p>
+          <p class="small muted" style="margin:8px 0 0">Cada módulo trae su conocimiento (fragmentos validados) y su configuración por defecto (metas, umbrales y alarmas). Combinables en multimorbilidad. Se agregan como archivos en <span class="mono">knowledge/</span>, sin tocar código.</p>
         </div>
         <div class="section">
           <h3>Temas que el asistente puede abordar</h3>
@@ -251,6 +255,16 @@ function renderForm() {
   updateCfgJson();
 }
 
+// Al activar un módulo, sus metas y umbrales por defecto se suman a la configuración (sin pisar lo editado)
+function aplicarDefaultsModulos(c) {
+  c.metas = c.metas || {};
+  c.umbrales = c.umbrales || {};
+  for (const m of CAT.modulos.filter((x) => x.disponible && c.modulos.includes(x.id))) {
+    for (const x of m.configuracion.metas) if (c.metas[x.clave] == null) c.metas[x.clave] = x.valor;
+    for (const x of m.configuracion.umbrales) if (c.umbrales[x.clave] == null) c.umbrales[x.clave] = x.valor;
+  }
+}
+
 function readForm() {
   const c = configDraft;
   $$('[data-cfg]').forEach((i) => {
@@ -275,6 +289,117 @@ function updateCfgJson() {
   }
 }
 
+// ================= Alarmas (protocolo de urgencia) =================
+let alarmEdit = null; // {id, tipo} | null
+const ORIG_PILL = { generica: 'Genérica', medica: 'Médica', dm2: 'DM2', hta: 'HTA' };
+
+function alarmCfg() {
+  return S.assistant ? S.assistant.config : configDraft;
+}
+function valorAlarma(a, c) {
+  return a.umbralRef ? c.umbrales[a.umbralRef] : a.valor;
+}
+// Nombre visible de una medición: los módulos (knowledge/*.json) la definen con "etiqueta"
+function nombreVariable(clave) {
+  const v = CAT.alarmas.variables[clave];
+  return (v && (v.etiqueta || v.label)) || clave;
+}
+function describirAlarma(a, c) {
+  if (a.tipo === 'texto') return `Menciona: ${a.frases.map((f) => `“${esc(f)}”`).join(', ')}`;
+  const v = nombreVariable(a.variable);
+  const u = (CAT.alarmas.variables[a.variable] || {}).unidad || '';
+  const sint = a.sintomas && a.sintomas.length ? ` <span class="muted">+ síntomas: ${a.sintomas.map((f) => `“${esc(f)}”`).join(', ')}</span>` : '';
+  return `<b>${esc(v)} ${esc(a.operador)} ${esc(valorAlarma(a, c))}</b> ${u}${a.umbralRef ? ` <span class="muted small">(umbral “${a.umbralRef}”)</span>` : ''}${sint}`;
+}
+
+function alarmEditor(a, c) {
+  const id = a ? a.id : 'nuevo';
+  const tipo = a ? a.tipo : alarmEdit.tipo;
+  const k = (f) => `alm-${id}-${f}`;
+  const V = CAT.alarmas.variables;
+  return `<div class="section" style="background:var(--surface-2);margin-top:8px">
+    <h3>${a ? `Modificar: ${esc(a.nombre)}` : 'Nueva alarma'} ${a && a.origen === 'generica' ? '<span class="hint">genérica: se puede pausar y modificar, no eliminar</span>' : ''}</h3>
+    <div class="inline-fields" style="grid-template-columns:2fr 1fr">
+      <label class="field">Nombre<input data-draft="${k('nombre')}" value="${esc(a ? a.nombre : '')}" placeholder="Ej.: Fiebre alta con escalofríos"></label>
+      <label class="field">Tipo<select data-draft="${k('tipo')}" ${a ? 'disabled' : 'data-alm-tipo'}>
+        <option value="texto" ${tipo === 'texto' ? 'selected' : ''}>Frases en el mensaje</option>
+        <option value="umbral" ${tipo === 'umbral' ? 'selected' : ''}>Umbral de una medición</option></select></label>
+    </div>
+    ${tipo === 'texto'
+      ? `<label class="field" style="margin-top:8px">Frases que la disparan (separadas por coma; sin tildes; puede ser el comienzo de una palabra)<textarea data-draft="${k('frases')}">${esc(a ? a.frases.join(', ') : '')}</textarea></label>`
+      : `<div class="inline-fields" style="margin-top:8px;grid-template-columns:1.3fr .7fr 1fr">
+          <label class="field">Medición<select data-draft="${k('variable')}" ${a ? 'disabled' : ''}>${Object.keys(V).map((v) => `<option value="${v}" ${a && a.variable === v ? 'selected' : ''}>${esc(nombreVariable(v))} (${esc(V[v].unidad || '')})</option>`).join('')}</select></label>
+          <label class="field">Operador<select data-draft="${k('operador')}">${CAT.alarmas.operadores.map((o) => `<option ${(a ? a.operador : '<') === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+          <label class="field">Valor${a && a.umbralRef ? ` (umbral “${a.umbralRef}”)` : ''}<input type="number" data-draft="${k('valor')}" value="${a ? esc(valorAlarma(a, c)) : ''}"></label>
+        </div>
+        <label class="field" style="margin-top:8px">Sólo si además menciona alguno de estos síntomas (opcional, separados por coma)<textarea data-draft="${k('sintomas')}">${esc(a && a.sintomas ? a.sintomas.join(', ') : '')}</textarea></label>`}
+    ${!a || a.origen === 'medica' ? `<label class="field" style="margin-top:8px">Motivo codificado (SNOMED CT, para el export a la HCE)<select data-draft="${k('motivo')}">${CAT.motivos.map((m) => `<option value="${m.clave}" ${a && a.snomed && a.snomed.code === m.code ? 'selected' : ''}>${esc(m.etiqueta)} — ${m.code} ${esc(m.display)}</option>`).join('')}</select></label>` : ''}
+    <label class="field" style="margin-top:8px">Indicación inmediata para la paciente (opcional; se suma al mensaje de urgencia)<textarea data-draft="${k('instruccion')}" style="min-height:44px">${esc(a && a.instruccion ? a.instruccion : '')}</textarea></label>
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary" id="almSave" data-id="${id}">Guardar alarma</button><button class="btn" id="almCancel">Cancelar</button></div>
+  </div>`;
+}
+
+function renderAlarmas() {
+  const box = document.getElementById('alarmasBox');
+  if (!box || !CAT) return;
+  const c = alarmCfg();
+  if (!c || !c.alarmas) return setHTML('alarmasBox', '');
+  const editable = !!S.assistant;
+  const mods = c.modulos || [];
+  const rows = c.alarmas
+    .map((a) => {
+      const modInactivo = !['generica', 'medica'].includes(a.origen) && !mods.includes(a.origen);
+      const on = a.activa !== false;
+      return `<tr style="${!on || modInactivo ? 'opacity:.55' : ''}">
+        <td><label class="check"><input type="checkbox" data-alm-toggle="${a.id}" ${on ? 'checked' : ''} ${editable ? '' : 'disabled'}> ${on ? 'Activa' : 'Pausada'}</label></td>
+        <td><b>${esc(a.nombre)}</b><br><span class="pill">${ORIG_PILL[a.origen] || esc(a.origen)}</span>${modInactivo ? ' <span class="small muted">módulo inactivo</span>' : ''}</td>
+        <td class="small">${describirAlarma(a, c)}${a.instruccion ? `<div class="muted" style="margin-top:2px">↳ ${esc(a.instruccion)}</div>` : ''}${a.snomed ? `<div class="muted" style="margin-top:2px">SNOMED CT ${esc(a.snomed.code)} · ${esc(a.snomed.display)}</div>` : ''}</td>
+        <td style="white-space:nowrap">${editable ? `<button class="btn sm" data-alm-edit="${a.id}">Modificar</button> ${a.origen === 'generica' ? '<button class="btn sm" disabled title="Las genéricas no se pueden eliminar">Eliminar</button>' : `<button class="btn sm danger" data-alm-del="${a.id}">Eliminar</button>`}` : ''}</td>
+      </tr>${alarmEdit && alarmEdit.id === a.id ? `<tr><td colspan="4">${alarmEditor(a, c)}</td></tr>` : ''}`;
+    })
+    .join('');
+  const activas = c.alarmas.filter((a) => a.activa !== false && (['generica', 'medica'].includes(a.origen) || mods.includes(a.origen))).length;
+  setHTML(
+    'alarmasBox',
+    `<div class="section" style="margin-top:14px">
+      <h3>Alarmas (protocolo de urgencia) <span class="hint">${activas} activas de ${c.alarmas.length} · primera capa determinística, se evalúa antes del modelo</span></h3>
+      ${editable ? '<div class="small muted" style="margin-bottom:8px">Los cambios se aplican al instante. Si una alarma se dispara, el asistente no intenta resolver: indica emergencias y avisa a la médica.</div>' : '<div class="callout warn" style="margin-bottom:8px">Estas son las alarmas predeterminadas (genéricas + módulos activos). Generá el asistente para pausarlas, modificarlas o agregar nuevas.</div>'}
+      <table class="t"><tr><th style="width:96px">Estado</th><th>Alarma</th><th>Criterio</th><th></th></tr>${rows}</table>
+      ${editable ? (alarmEdit && alarmEdit.id === 'nuevo' ? alarmEditor(null, c) : '<button class="btn" id="almAdd" style="margin-top:10px">＋ Agregar alarma</button>') : ''}
+    </div>`
+  );
+}
+
+async function alarmOp(method, path, body, okMsg) {
+  try {
+    const r = await api(path, { method, body: body || {} });
+    const prev = S.assistant.config.umbrales;
+    if (configDraft) {
+      configDraft.alarmas = r.alarmas;
+      for (const key of Object.keys(r.umbrales)) if (r.umbrales[key] !== prev[key]) configDraft.umbrales[key] = r.umbrales[key];
+      configDraft._from = r.actualizado;
+    }
+    alarmEdit = null;
+    if (okMsg) toast(okMsg);
+    await refresh();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function alarmFormData(id, tipo) {
+  const g = (f) => {
+    const el = document.querySelector(`[data-draft="alm-${id}-${f}"]`);
+    return el ? el.value : undefined;
+  };
+  const d = { nombre: g('nombre'), instruccion: g('instruccion') };
+  if (g('motivo') !== undefined) d.motivo = g('motivo');
+  if (tipo === 'texto') d.frases = g('frases');
+  else Object.assign(d, { variable: g('variable'), operador: g('operador'), valor: g('valor'), sintomas: g('sintomas') });
+  if (id === 'nuevo') d.tipo = tipo;
+  return d;
+}
+
 // ================= 2. Panel =================
 function renderPanel() {
   if (!S.assistant) {
@@ -288,7 +413,7 @@ function renderPanel() {
     <div class="kpis">
       <div class="kpi"><div class="label">Proporción de días cubiertos</div><div class="value">${m.pdc ?? '—'}${m.pdc != null ? '%' : ''}</div><div class="sub">${m.diasCubiertos}/${m.diasEvaluados} días · 14 d</div>${st(m.pdc, 80, 60)}</div>
       <div class="kpi"><div class="label">Tomas confirmadas</div><div class="value">${m.adherenciaTomas ?? '—'}${m.adherenciaTomas != null ? '%' : ''}</div><div class="sub">${m.tomasEvaluadas} tomas evaluadas</div></div>
-      <div class="kpi"><div class="label">Glucemia en ayunas (prom.)</div><div class="value">${m.glucemiaAyunasPromedio ?? '—'}</div><div class="sub">mg/dl · meta ${cfg.metas.ayunasMin}–${cfg.metas.ayunasMax}</div></div>
+      <div class="kpi"><div class="label">Glucemia en ayunas (prom.)</div><div class="value">${m.glucemiaAyunasPromedio ?? '—'}</div><div class="sub">mg/dl${cfg.metas.ayunasMin != null ? ` · meta ${cfg.metas.ayunasMin}–${cfg.metas.ayunasMax}` : ''}</div></div>
       <div class="kpi"><div class="label">Glucemias en meta</div><div class="value">${m.tiempoEnMeta ?? '—'}${m.tiempoEnMeta != null ? '%' : ''}</div><div class="sub">${m.glucemiasRegistradas} registros</div>${st(m.tiempoEnMeta, 70, 50)}</div>
       <div class="kpi"><div class="label">Alertas abiertas</div><div class="value" style="color:${m.alertasAbiertas ? 'var(--critical)' : 'inherit'}">${m.alertasAbiertas}</div><div class="sub">${S.alerts.filter((a) => !a.ack && a.nivel === 'alta').length} de prioridad alta</div></div>
       <div class="kpi"><div class="label">Derivaciones pendientes</div><div class="value">${m.derivacionesPendientes}</div><div class="sub">${m.sugerenciasPendientes} sugerencia(s) de evidencia</div></div>
@@ -306,7 +431,7 @@ function renderPanel() {
       <div class="item">
         ${r.mediaUrl ? `<a href="${r.mediaUrl}" target="_blank"><img class="thumb" src="${r.mediaUrl}" alt="adjunto"></a>` : ''}
         <div class="body">
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sev ${r.prioridad}">${r.prioridad.toUpperCase()}</span><b>${esc(r.motivo)}</b></div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="sev ${r.prioridad}">${r.prioridad.toUpperCase()}</span><b>${esc(r.motivo)}</b>${r.codigo ? `<span class="pill" title="Motivo codificado en SNOMED CT (se exporta en Communication.reasonCode)">SNOMED ${esc(r.codigo.code)} · ${esc(r.codigo.display)}</span>` : ''}</div>
           <div style="margin-top:4px">${esc(r.resumen)}</div>
           <div class="meta">${fDT(r.ts)} · ${r.estado === 'pendiente' ? 'pendiente' : `respondida: “${esc(r.respuesta)}”`}</div>
           ${r.estado === 'pendiente' ? `<div class="reply"><input data-draft="rep-${r.id}" placeholder="Responder a Marta…" list="quick-${r.id}"><datalist id="quick-${r.id}">${quick.map((q) => `<option value="${esc(q)}">`).join('')}</datalist><button class="btn sm primary" data-reply="${r.id}">Enviar</button></div>` : ''}
@@ -323,7 +448,7 @@ function renderPanel() {
           <div class="meta">Disparada por: “${esc(s.pregunta)}” · ${fDT(s.ts)}</div>
           <div style="margin-top:4px">${esc(s.texto)}</div>
           <ol class="cites">${s.citas.map((c) => `<li>${esc(c.ref)} ${c.url ? `<a href="${c.url}" target="_blank">↗</a>` : ''}</li>`).join('')}</ol>
-          ${s.estado === 'pendiente' ? `<div class="reply"><button class="btn sm" data-sug="${s.id}" data-est="aceptada">Evaluar en consulta</button><button class="btn sm" data-sug="${s.id}" data-est="descartada">Descartar</button></div>` : `<div class="meta">Estado: ${s.estado}</div>`}
+          ${s.estado === 'pendiente' ? `<div class="reply"><button class="btn sm" data-sug="${s.id}" data-est="aceptada">Evaluar en consulta</button><button class="btn sm" data-sug="${s.id}" data-est="descartada">Descartar</button></div>` : `<div class="meta">${s.estado === 'aceptada' ? 'Para evaluar en consulta' : 'Descartada'}${s.resuelta ? ` · ${fDT(s.resuelta)}` : ''}${s.resueltaPor ? ` · ${esc(s.resueltaPor.nombre)}` : ''} <span class="muted">(queda en la auditoría y en la HCE)</span></div>`}
           <div class="small muted" style="margin-top:6px">La paciente no recibe esta sugerencia: sólo la médica decide cambios de tratamiento.</div>
         </div>
       </div>`).join('')
@@ -375,6 +500,7 @@ function glucoseChart(cfg) {
   const desde = S.clock - 14 * 86400e3;
   const pts = S.observations.filter((o) => o.tipo === 'glucemia' && o.ts > desde).sort((a, b) => a.ts - b.ts);
   if (!pts.length) return '<div class="empty">Todavía no hay glucemias registradas. Marta puede enviarlas por mensaje o con una foto del glucómetro.</div>';
+  if (cfg.metas.ayunasMin == null || cfg.umbrales.hipo == null) return '<div class="empty">El módulo de diabetes no está activo: no hay metas de glucemia para graficar.</div>';
   const W = 760, H = 240, L = 40, R = 12, T = 12, B = 26;
   const yMin = 40, yMax = Math.max(300, ...pts.map((p) => p.valor + 10));
   const x0 = desde, x1 = S.clock;
@@ -462,21 +588,26 @@ function renderEvidence() {
 // ================= HCE / FHIR =================
 let fhirCache = null;
 let cdsCache = null;
+// Vista de datos identificados abierta en la pestaña FHIR: null | { tipo: 'bundle' | 'hce', data }.
+// Abrir consulta al servidor (y queda auditado); cerrar sólo oculta y descarta los datos, sin generar entrada.
+let vistaDatos = null;
 function renderFhir() {
-  const counts = {};
-  const sig = JSON.stringify([S.messages.length, S.observations.length, S.doses.length, S.media.length, S.referrals.length, S.appointments.length, S.summaries.length, S.assistant && S.assistant.actualizado, S.referrals.filter((r) => r.estado !== 'pendiente').length]);
-  if (fhirCache && fhirCache.sig === sig) {
-    fhirCache.bundle.entry.forEach((e) => (counts[e.resource.resourceType] = (counts[e.resource.resourceType] || 0) + 1));
-  } else {
-    fhirCache = { sig, bundle: null };
-    api('/api/fhir/bundle').then((b) => {
-      fhirCache.bundle = b;
+  // la pestaña muestra sólo cantidades (sin datos de la paciente); el Bundle completo se ve a pedido y queda auditado
+  const sig = JSON.stringify([S.messages.length, S.observations.length, S.doses.length, S.media.length, S.referrals.length, S.appointments.length, S.summaries.length, S.assistant && S.assistant.actualizado, S.referrals.filter((r) => r.estado !== 'pendiente').length, (S.exportaciones || []).length]);
+  if (!fhirCache || fhirCache.sig !== sig) {
+    fhirCache = { sig, resumen: null };
+    api('/api/fhir/resumen').then((r) => {
+      fhirCache.resumen = r;
       rendered['tab-fhir'] = null;
       renderFhir();
     });
     return;
   }
-  if (!fhirCache.bundle) return;
+  if (!fhirCache.resumen) return;
+  const counts = fhirCache.resumen.recursos;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const exps = S.exportaciones || [];
+  const ultima = exps[exps.length - 1];
   const map = [
     ['Plan de cuidado y metas', ['CarePlan', 'Goal']],
     ['Medicación indicada', ['MedicationRequest']],
@@ -486,19 +617,23 @@ function renderFhir() {
     ['Consultas relevantes y derivaciones', ['Communication']],
     ['Turnos', ['Appointment']],
     ['Resumen del período', ['Composition']],
+    ['Sugerencias de evidencia y decisión de la médica', ['GuidanceResponse', 'Task']],
+    ['Trazabilidad y auditoría de la sesión', ['Provenance', 'AuditEvent']],
   ];
   setHTML('tab-fhir', `
     <div class="stack">
       <div class="section">
-        <h3>Exportación a la historia clínica (HL7 FHIR R4) <span class="hint">${fhirCache.bundle.entry.length} recursos</span></h3>
+        <h3>Exportación a la historia clínica (HL7 FHIR R4) <span class="hint">${total} recursos</span></h3>
         <table class="t"><tr><th>Información generada</th><th>Recurso FHIR</th><th class="num">Cantidad</th></tr>
         ${map.map(([l, rs]) => `<tr><td>${l}</td><td class="mono small">${rs.join(', ')}</td><td class="num">${rs.reduce((s, r) => s + (counts[r] || 0), 0)}</td></tr>`).join('')}</table>
-        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-          <a class="btn primary" href="/api/fhir/bundle?download=1">Descargar Bundle (JSON)</a>
-          <button class="btn" id="btnShowBundle">Ver Bundle</button>
-          <button class="btn" id="btnShowHce">Ver datos originales de la HCE</button>
+        <div class="callout" style="margin-top:10px">Los datos de la paciente no se descargan a archivos: salen del sistema sólo hacia la HCE. Cada envío y cada vista del Bundle completo quedan en la auditoría.</div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn primary" id="btnExportHce" ${S.assistant ? '' : 'disabled'}>Enviar a la HCE</button>
+          <button class="btn ${vistaDatos && vistaDatos.tipo === 'bundle' ? 'active' : ''}" id="btnShowBundle" title="${vistaDatos && vistaDatos.tipo === 'bundle' ? 'Cerrar' : 'Abrir (queda registrado en la auditoría)'}">${vistaDatos && vistaDatos.tipo === 'bundle' ? 'Ocultar Bundle' : 'Ver Bundle'}</button>
+          <button class="btn ${vistaDatos && vistaDatos.tipo === 'hce' ? 'active' : ''}" id="btnShowHce" title="${vistaDatos && vistaDatos.tipo === 'hce' ? 'Cerrar' : 'Abrir (queda registrado en la auditoría)'}">${vistaDatos && vistaDatos.tipo === 'hce' ? 'Ocultar datos de la HCE' : 'Ver datos originales de la HCE'}</button>
+          <span class="small muted">${ultima ? `Último envío: ${fDT(ultima.ts)} · ${ultima.total} recursos · ${exps.length} envío(s) en la sesión` : 'Todavía no se envió a la HCE'}</span>
         </div>
-        <pre class="json" id="bundleView" style="display:none;margin-top:10px"></pre>
+        ${vistaDatos ? `<pre class="json" id="bundleView" style="margin-top:10px">${esc(JSON.stringify(vistaDatos.data, null, 2))}</pre>` : ''}
       </div>
       <div class="section">
         <h3>CDS Hooks · <span class="mono">patient-view</span> <span class="hint">las alertas aparecen dentro de la HCE al abrir el registro</span></h3>
@@ -518,11 +653,39 @@ function renderCds(r) {
 }
 
 // ================= Trazas =================
-function renderTraces() {
+let trazAlcance = 'sesion'; // sesion: las últimas 80 de esta sesión (en memoria, con texto) · historial: logs/trazas.jsonl
+let TRZ = null;
+let trzCargando = false;
+async function cargarTrazas() {
+  if (trzCargando) return;
+  trzCargando = true;
+  try {
+    TRZ = await api('/api/trazas?alcance=todo&limite=1000');
+  } catch {
+    TRZ = null;
+  }
+  trzCargando = false;
+  renderTraces(true);
+}
+
+function renderTraces(forzar = false) {
   const tr = S.traces;
+  const selector = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><select id="trzAlcance" class="sm"><option value="sesion" ${trazAlcance === 'sesion' ? 'selected' : ''}>Esta sesión (últimas 80)</option><option value="historial" ${trazAlcance === 'historial' ? 'selected' : ''}>Historial completo (logs/, sin datos de la paciente)</option></select>${trazAlcance === 'historial' && TRZ ? `<span class="pill ${TRZ.integridad.ok ? 'ok' : 'bad'}">${TRZ.integridad.ok ? '✓' : '✗'} trazas: ${TRZ.integridad.registros} registros</span>` : ''}</div>`;
+  const pasosHtml = (pasos) => `<ol>${pasos.map((p) => `<li><b>${esc(p.paso)}:</b> ${esc(p.detalle)}</li>`).join('')}</ol>`;
+  let cuerpo;
+  if (trazAlcance === 'historial') {
+    if (currentTab === 'trazas' && !forzar) cargarTrazas();
+    cuerpo = !TRZ
+      ? '<div class="empty">Cargando el historial…</div>'
+      : TRZ.trazas.length
+        ? TRZ.trazas.map((t) => `<div class="trace"><div class="ev">${esc(t.evento)} <span class="small muted">· ${fDT(t.ts)} · ${t.sesion === TRZ.sesion ? 'esta sesión' : `sesión ${esc(t.sesion)}`} · ${esc(t.actor.nombre)}${t.interaccion ? ` · <a class="provlink" data-prov="${t.interaccion}">procedencia</a>` : ''}</span></div>${pasosHtml(t.pasos)}</div>`).join('')
+        : '<div class="empty">Sin trazas registradas</div>';
+  } else {
+    cuerpo = tr.length ? tr.map((t) => `<div class="trace"><div class="ev">${esc(t.evento)} <span class="small muted">· ${fDT(t.ts)}</span></div>${pasosHtml(t.pasos)}</div>`).join('') : '<div class="empty">Sin eventos</div>';
+  }
   setHTML('tab-trazas', `
-    <div class="callout" style="margin-bottom:14px">Cada interacción muestra el recorrido por la arquitectura: filtro de seguridad → recuperación en la base especializada (RAG) → clasificación de intención con el modelo de lenguaje → módulos de servicio (registro, evidencia, derivación, turnos) → recursos FHIR.</div>
-    ${tr.length ? tr.map((t) => `<div class="trace"><div class="ev">${esc(t.evento)} <span class="small muted">· ${fDT(t.ts)}</span></div><ol>${t.pasos.map((p) => `<li><b>${esc(p.paso)}:</b> ${esc(p.detalle)}</li>`).join('')}</ol></div>`).join('') : '<div class="empty">Sin eventos</div>'}`);
+    <div class="callout" style="margin-bottom:14px">Cada interacción muestra el recorrido por la arquitectura: filtro de seguridad → recuperación en la base especializada (RAG) → clasificación de intención con el modelo de lenguaje → módulos de servicio (registro, evidencia, derivación, turnos) → recursos FHIR. El historial completo se guarda en <b>logs/trazas.jsonl</b> sin el texto ni los datos personales de la paciente.</div>
+    ${selector}${cuerpo}`);
   const last = tr[0];
   setHTML('lastTrace', last ? `<div class="role">Cómo lo procesó el sistema</div><div style="font-size:12.5px;font-weight:600;margin-top:2px">${esc(last.evento)}</div><ol>${last.pasos.map((p) => `<li><b>${esc(p.paso)}:</b> ${esc(p.detalle)}</li>`).join('')}</ol>` : '<div class="role">Cómo lo procesó el sistema</div><div class="small muted">Las trazas aparecen acá con cada interacción.</div>');
 }
@@ -533,7 +696,9 @@ let lastMsgCount = 0;
 
 function renderChat() {
   const has = !!S.assistant;
-  $('#phoneOverlay').style.display = has ? 'none' : 'grid';
+  const simCorr = !!(S.simulacion && S.simulacion.estado === 'corriendo');
+  $('#phoneOverlay').style.display = has && !simCorr ? 'none' : 'grid';
+  $('#phoneOverlay').textContent = simCorr ? `Simulación con plan en curso (${S.simulacion.hechos}/${S.simulacion.total} pasos)… los mensajes aparecen en el panel Simulación.` : 'Esperando que la Dra. Lucía configure el asistente…';
   const canal = has ? S.assistant.config.canal : 'whatsapp';
   $('#waHead').className = `wa-head ${canal === 'app' ? 'app' : ''}`;
   $('#waStatus').textContent = S.busy ? 'escribiendo…' : canal === 'app' ? 'App del asistente (simulada)' : 'WhatsApp Business (simulado)';
@@ -558,7 +723,8 @@ function renderChat() {
 }
 
 function bubble(m) {
-  const time = `<div class="time">${fT(m.ts)}${m.from === 'marta' ? ' ✓✓' : ''}</div>`;
+  const prov = m.procedencia ? ` · <a class="provlink" data-prov="${m.procedencia}" title="Ver la procedencia de esta respuesta (modelo, versiones y fragmentos usados)">procedencia</a>` : '';
+  const time = `<div class="time">${fT(m.ts)}${m.from === 'marta' ? ' ✓✓' : ''}${prov}</div>`;
   if (m.from === 'marta') {
     let body = '';
     if (m.kind === 'image' && m.attachment) body += `<a href="${m.attachment.url}" target="_blank"><img src="${m.attachment.url}" alt="${esc(m.attachment.nombre)}"></a>`;
@@ -741,6 +907,270 @@ function updateSendIcon() {
   $('#icoSend').style.display = has ? '' : 'none';
 }
 
+
+// ================= Simulación con plan JSON =================
+let PLANES = [];
+let planSel = null; // { nombre, contenido }
+let simVisto = null;
+const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
+
+function kv(o) {
+  return Object.entries(o || {})
+    .map(([k, v]) => `<div class="kv"><b>${esc(k)}:</b> ${esc(Array.isArray(v) ? v.join(', ') || '—' : v === null ? '—' : String(v))}</div>`)
+    .join('') || '<span class="small muted">sin expectativa (no se evalúa)</span>';
+}
+function obtenidoCompacto(o, esp) {
+  const base = { intencion: o.intencion, alarma: o.alarma, origenAlarma: o.origenAlarma, derivacion: o.derivacion, codigoDerivacion: o.codigosDerivacion, registro: o.registro, fuente: o.fuentes, evidencia: o.evidencia, sugerencia: o.sugerencia };
+  // primero lo que se esperaba, después el resto con valor
+  const claves = Object.keys(base).filter((k) => k in esp || (base[k] != null && base[k] !== false && !(Array.isArray(base[k]) && !base[k].length)));
+  const out = {};
+  for (const k of claves) out[k] = base[k];
+  if ('fueraDeAlcance' in esp) out.fueraDeAlcance = o.derivacion ? 'derivada' : o.intencion === 'educativa' || (o.fuentes || []).length || o.evidencia ? 'respondida' : 'declinada';
+  if (o.sinRespaldo) out.sinRespaldo = 'respuesta educativa sin fuente citada';
+  return kv(out);
+}
+
+function renderSim() {
+  const j = S.simulacion;
+  const corriendo = j && j.estado === 'corriendo';
+  $('#simBadge').innerHTML = corriendo ? `<span class="count">${j.hechos}/${j.total}</span>` : '';
+  if (!j) {
+    setHTML('tab-sim', `<div class="stack">
+      <div class="callout">Ejecutá un plan JSON con pasos de la paciente (mensajes o archivos de prueba, con su momento) y el resultado esperado de cada uno. Al terminar, el reporte compara lo obtenido con lo esperado: sensibilidad de alarmas, falsos positivos, preguntas fuera de alcance y derivaciones correctas.</div>
+      <div><button class="btn primary" id="btnPlan2">Ejecutar un plan JSON…</button></div></div>`);
+    return;
+  }
+  if (j.id !== simVisto && j.estado !== 'corriendo') {
+    simVisto = j.id;
+    if (currentTab === 'sim') toast(j.estado === 'terminada' ? 'Simulación terminada' : j.estado === 'cancelada' ? 'Simulación cancelada' : `Error en la simulación: ${j.error}`, j.estado === 'error');
+  }
+  const m = j.metricas || { pasos: 0, evaluados: 0, correctos: 0, alarmas: {}, derivaciones: {}, fueraDeAlcance: {}, intencion: {} };
+  const a = m.alarmas || {};
+  const d = m.derivaciones || {};
+  const fa = m.fueraDeAlcance || {};
+  const tono = (x, bien = 1) => (x == null ? '' : x >= bien ? 'good' : x >= 0.8 ? 'warn' : 'bad');
+  const estadoTxt = { corriendo: '⏳ En curso', terminada: '✓ Terminada', cancelada: '⏹ Cancelada', error: '⚠ Error' }[j.estado];
+  const dur = ((j.fin || Date.now()) - j.inicio) / 1000;
+  let filas = '';
+  let planAnt = null;
+  for (const r of j.resultados) {
+    if (r.plan !== planAnt) {
+      filas += `<tr class="plan-row"><td colspan="5">${esc(r.plan)}</td></tr>`;
+      planAnt = r.plan;
+    }
+    filas += `<tr>
+      <td class="res ${r.evaluado ? (r.ok ? 'ok' : 'bad') : ''}">${r.evaluado ? (r.ok ? '✓' : '✗') : '·'}</td>
+      <td><b class="small">${esc(r.paso)}</b><div class="small">${esc(r.entrada)}</div></td>
+      <td>${kv(r.esperado)}</td>
+      <td>${obtenidoCompacto(r.obtenido, r.esperado)}${r.fallas.map((f) => `<div class="falla">✗ ${esc(f)}</div>`).join('')}</td>
+      <td><details><summary>Respuesta</summary><div>${esc(r.obtenido.respuesta || '(sin respuesta)')}</div></details></td>
+    </tr>`;
+  }
+  setHTML('tab-sim', `<div class="stack">
+    <div class="sim-head">
+      <div>
+        <div style="font-weight:650">${esc(j.nombre)} <span class="pill">${estadoTxt}</span></div>
+        <div class="small muted">${j.planes.length} plan(es) · ${j.hechos}/${j.total} pasos · motor: ${esc(j.motor)} · ${dur.toFixed(0)} s</div>
+        ${j.error ? `<div class="small val-err">${esc(j.error)}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${corriendo ? '<button class="btn danger sm" id="btnPlanCancel">Cancelar</button>' : '<button class="btn sm" id="btnPlan3">Ejecutar otro plan…</button>'}
+      </div>
+    </div>
+    <div class="progress"><div style="width:${j.total ? (100 * j.hechos) / j.total : 0}%"></div></div>
+    <div class="kpis">
+      <div class="kpi ${tono(m.tasaAcierto)}"><div class="label">Pasos correctos</div><div class="value">${m.correctos}/${m.evaluados}</div><div class="sub">acierto ${pct(m.tasaAcierto)}</div></div>
+      <div class="kpi ${tono(a.sensibilidad)}"><div class="label">Sensibilidad de alarmas</div><div class="value">${pct(a.sensibilidad)}</div><div class="sub">${a.vp || 0} detectadas de ${(a.vp || 0) + (a.fn || 0)} esperadas</div></div>
+      <div class="kpi ${a.evaluadas ? (a.fp ? 'bad' : 'good') : ''}"><div class="label">Falsos positivos</div><div class="value">${a.evaluadas ? a.fp : '—'}</div><div class="sub">especificidad ${pct(a.especificidad)}</div></div>
+      <div class="kpi ${fa.preguntas ? (fa.respondidas ? 'bad' : 'good') : ''}" title="Correcta: derivada a la médica o declinada sin dar contenido. Error: respondida con contenido sin derivar."><div class="label">Fuera de alcance</div><div class="value">${fa.preguntas ? `${fa.correctas}/${fa.preguntas}` : '—'}</div><div class="sub">${fa.derivadas || 0} derivadas · ${fa.declinadas || 0} declinadas · ${fa.respondidas || 0} respondidas${fa.respuestasSinRespaldo ? ` · ${fa.respuestasSinRespaldo} educativas sin fuente` : ''}</div></div>
+      <div class="kpi ${tono(d.tasa)}"><div class="label">Derivaciones correctas</div><div class="value">${d.evaluadas ? `${d.correctas}/${d.evaluadas}` : '—'}</div><div class="sub">${pct(d.tasa)}</div></div>
+    </div>
+    <div class="section" style="overflow-x:auto">
+      <h3>Obtenido vs. esperado <span class="hint">✓ coincide · ✗ no coincide · · sin expectativa</span></h3>
+      ${j.resultados.length ? `<table class="t simtbl"><tr><th></th><th>Paso</th><th>Esperado</th><th>Obtenido</th><th></th></tr>${filas}</table>` : '<div class="empty">Esperando el primer paso…</div>'}
+    </div>
+  </div>`);
+}
+
+async function abrirPlanModal() {
+  $('#simMenu').classList.remove('open');
+  $('#planModal').classList.add('open');
+  try {
+    PLANES = await api('/api/sim/planes');
+  } catch {
+    PLANES = [];
+  }
+  $('#planEjemplos').innerHTML = PLANES.length
+    ? PLANES.map((p, i) => `<button class="plan-ej" data-plan-ej="${i}"><b>${esc(p.nombre)}</b><small>${esc(p.descripcion)}</small><small>${p.planes} plan(es) · ${p.pasos} pasos · ${esc(p.archivo)}</small></button>`).join('')
+    : '<div class="small muted">No hay planes en muestras/planes.</div>';
+  validarPlanTxt();
+}
+function cerrarPlanModal() {
+  $('#planModal').classList.remove('open');
+}
+function usarPlan(nombre, contenido) {
+  planSel = { nombre };
+  $('#planTxt').value = typeof contenido === 'string' ? contenido : JSON.stringify(contenido, null, 2);
+  $('#planNombre').textContent = nombre;
+  validarPlanTxt();
+}
+let valTimer = null;
+function validarPlanTxt() {
+  clearTimeout(valTimer);
+  valTimer = setTimeout(async () => {
+    const out = $('#planVal');
+    const txt = $('#planTxt').value.trim();
+    $('#planRun').disabled = true;
+    if (!txt) return (out.innerHTML = '<span class="muted">Elegí un plan de ejemplo, cargá un archivo o pegá el JSON.</span>');
+    let json;
+    try {
+      json = JSON.parse(txt);
+    } catch (e) {
+      return (out.innerHTML = `<span class="val-err">JSON inválido: ${esc(e.message)}</span>`);
+    }
+    try {
+      const r = await api('/api/sim/plan/validate', { body: { plan: json } });
+      out.innerHTML = `<span class="val-ok">✓ Plan válido: ${r.planes} plan(es), ${r.pasos} pasos.</span> <span class="muted">La ejecución reinicia la demo.</span>`;
+      $('#planRun').disabled = false;
+    } catch (e) {
+      out.innerHTML = `<span class="val-err">${esc(e.message)}</span>`;
+    }
+  }, 250);
+}
+async function ejecutarPlan() {
+  let json;
+  try {
+    json = JSON.parse($('#planTxt').value);
+  } catch {
+    return toast('JSON inválido', true);
+  }
+  const nombre = json.nombre || (planSel && planSel.nombre) || 'plan';
+  try {
+    await api('/api/sim/plan', { body: { plan: json, nombre } });
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  cerrarPlanModal();
+  configDraft = null;
+  Object.keys(rendered).forEach((k) => delete rendered[k]);
+  switchTab('sim');
+  toast('Simulación iniciada');
+  await refresh();
+}
+
+
+// ================= Auditoría (trazabilidad SaMD) =================
+let AUD = null; // respuesta de /api/auditoria
+let audAlcance = 'sesion';
+let audCargando = false;
+let audResaltar = null;
+const ACCION = { C: 'Alta', R: 'Consulta', U: 'Modificación', D: 'Baja', E: 'Acción' };
+const corto = (v) => {
+  const s = typeof v === 'string' ? v : JSON.stringify(v);
+  return s == null ? '—' : s.length > 90 ? `${s.slice(0, 87)}…` : s;
+};
+
+async function cargarAuditoria() {
+  if (audCargando) return;
+  audCargando = true;
+  try {
+    AUD = await api(`/api/auditoria?alcance=${audAlcance}`);
+  } catch {
+    AUD = null;
+  }
+  audCargando = false;
+  renderAuditoria(true);
+}
+
+function cambiosHtml(r) {
+  if (r.accion === 'C' && r.despues) return `<div class="kv">creado: ${esc(corto(r.despues.nombre || r.objeto.nombre || r.objeto.id))}</div>`;
+  if (r.accion === 'D') return `<div class="kv">eliminado (antes: ${esc(corto(r.antes))})</div>`;
+  if (!r.cambios.length) return `<span class="small muted">${esc(r.detalle || '—')}</span>`;
+  return r.cambios.map((c) => `<div class="kv"><b>${esc(c.campo)}:</b> <span class="antes">${esc(corto(c.antes))}</span> → <span class="despues">${esc(corto(c.despues))}</span></div>`).join('');
+}
+
+function renderAuditoria(forzar = false) {
+  if (currentTab !== 'auditoria') return;
+  if (!forzar) return cargarAuditoria();
+  if (!AUD) return setHTML('tab-auditoria', '<div class="empty">Cargando la auditoría…</div>');
+  const msgs = new Map(S.messages.map((m) => [m.id, m]));
+  const integ = (n, i) => `<span class="pill ${i.ok ? 'ok' : 'bad'}" title="${esc(i.error || 'Cadena de hashes verificada')}">${i.ok ? '✓' : '✗'} ${n}: ${i.registros} registros${i.ok ? '' : ` · línea ${i.linea}: ${esc(i.error)}`}</span>`;
+  const v = AUD.versiones;
+  const filasAud = AUD.auditoria
+    .map(
+      (r) => `<tr>
+      <td class="small">${fDT(r.ts)}<div class="muted" title="Fecha y hora reales del registro (el reloj de arriba es el simulado)">registrado ${esc(new Date(r.registrado).toLocaleString('es-AR', { hour12: false, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</div></td>
+      <td class="small">${esc(r.actor.nombre)}<div class="muted">${esc(r.actor.origen || '')}</div></td>
+      <td class="small"><span class="pill ${r.categoria === 'exportacion' ? 'bad' : ''}">${r.categoria === 'exportacion' ? 'Exportación' : r.categoria === 'decision' ? 'Decisión clínica' : ACCION[r.accion] || r.accion}</span><div>${esc(r.evento)}</div></td>
+      <td class="small">${esc(r.objeto.nombre || r.objeto.id)}<div class="muted">${esc(r.objeto.tipo)} · ${esc(r.objeto.id)}</div></td>
+      <td>${cambiosHtml(r)}</td>
+      <td class="small num">${r.configuracion.versionAntes != null || r.configuracion.versionDespues != null ? `v${r.configuracion.versionAntes ?? '—'} → v${r.configuracion.versionDespues ?? '—'}` : '—'}</td>
+    </tr>`,
+    )
+    .join('');
+  const filasProv = AUD.procedencia
+    .map((p) => {
+      const entrada = p.entrada && msgs.get(p.entrada.id);
+      const d = p.decision;
+      const pills = [
+        d.intencion ? `<span class="tag i-${d.intencion}">${INTENT_LABEL[d.intencion] || d.intencion}</span>` : '',
+        d.alarma ? `<span class="tag i-alarma">alarma · ${d.origenAlarma}</span>` : '',
+        d.derivacion ? `<span class="tag i-derivacion">derivación ${d.derivacion}</span>` : '',
+        d.guardrails.length ? `<span class="tag">guardrails: ${d.guardrails.map((g) => (g.aceptada ? 'aceptada' : `rechazada (${g.fallidos.join(', ')})`)).join(', ')}</span>` : '',
+        d.evidencia.length ? `<span class="tag">evidencia → ${esc(d.evidencia.map((e) => e.destino).join(', '))}</span>` : '',
+      ].join('');
+      const modelos = p.modelo.llamadas.length
+        ? p.modelo.llamadas.map((l) => `<div class="kv">${esc(l.funcion)}: <b>${esc(l.modeloId || l.alias)}</b>${l.error ? ' <span class="falla">error</span>' : ''}<span class="muted"> · prompt ${esc(l.plantilla || '—')}</span></div>`).join('')
+        : `<span class="small muted">${esc(p.modelo.motor)}</span>`;
+      const cfgv = p.versiones.configuracion;
+      const frag = p.rag.recuperados
+        .map((f) => `<span class="chip ${p.rag.citados.includes(f.id) ? 'citado' : p.rag.enviadosAlModelo.includes(f.id) ? 'enviado' : ''}" title="${f.plan ? 'Indicación propia de la médica' : `Módulo ${esc(f.modulo)}`} · versión ${esc(f.version)} · score ${f.score ?? '—'}">${esc(f.id)}</span>`)
+        .join('');
+      const texto = entrada ? entrada.text || (entrada.attachment && `[${entrada.attachment.nombre}]`) : p.entrada ? '(mensaje de otra sesión)' : esc(p.interaccion);
+      return `<tr id="prov-${p.id}" class="${audResaltar === p.id ? 'resaltado' : ''}">
+        <td class="small">${fDT(p.ts)}<div class="muted">${esc(p.actor.nombre)}</div></td>
+        <td class="small">${esc(corto(texto))}<div class="muted">${esc(p.interaccion)} · ${p.respuestas.length} salida(s)</div></td>
+        <td><div class="tags">${pills}</div></td>
+        <td>${modelos}</td>
+        <td class="small">${cfgv ? `config v${cfgv.version}` : '—'}<div class="muted">${p.versiones.modulos.map((m) => `${m.id} ${m.version}`).join(' · ')}${p.versiones.alarmasGenericas ? ` · genéricas ${p.versiones.alarmasGenericas}` : ''}</div></td>
+        <td><div class="chips-frag">${frag || '<span class="small muted">—</span>'}</div></td>
+        <td><details><summary>JSON</summary><pre class="mini">${esc(JSON.stringify(p, null, 1))}</pre></details></td>
+      </tr>`;
+    })
+    .join('');
+  setHTML(
+    'tab-auditoria',
+    `<div class="stack">
+    <div class="callout">Trazabilidad como software de uso médico. Cada <b>respuesta</b> del asistente queda asociada al modelo y la plantilla de prompt, las versiones de los módulos, la versión de la configuración de la médica y los fragmentos del RAG (<b>Provenance</b>). Cada <b>cambio de configuración</b> registra quién, cuándo y el valor antes y después (<b>AuditEvent</b>). También quedan las <b>consultas</b> de datos identificados (ver el Bundle, la HCE de origen, CDS Hooks) y cada <b>envío a la HCE</b>. Todo se guarda en la carpeta <b>logs/</b>, fuera del estado de la demo (“Reiniciar” no lo borra), <b>sin datos personales de la paciente</b>: figura con un seudónimo. Los logs no se descargan desde la app.</div>
+    <div class="sim-head">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        ${integ('auditoría', AUD.integridad.auditoria)} ${integ('procedencia', AUD.integridad.procedencia)} ${integ('trazas', AUD.integridad.trazas)}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <select id="audAlcance" class="sm"><option value="sesion" ${audAlcance === 'sesion' ? 'selected' : ''}>Esta sesión</option><option value="todo" ${audAlcance === 'todo' ? 'selected' : ''}>Todas las sesiones</option></select>
+        <span class="pill" title="Identificador de la paciente en logs/. Sólo el sistema, con su clave, puede relacionarlo con la persona.">Paciente en los logs: <b class="mono">${esc(AUD.seudonimo)}</b></span>
+      </div>
+    </div>
+    <div class="small muted">Versión vigente: app ${esc(v.app.version)}${v.app.commit ? ` (${esc(v.app.commit)})` : ''} · ${v.modulos.map((m) => `${esc(m.id)} ${esc(m.version)}`).join(' · ') || 'sin módulos'} · alarmas genéricas ${esc(v.alarmasGenericas || '—')} · ${v.configuracion ? `configuración v${v.configuracion.version} (sha256 ${v.configuracion.sha256.slice(0, 12)})` : 'sin configuración'}</div>
+    <div class="section" style="overflow-x:auto">
+      <h3>Cambios, consultas y exportaciones <span class="hint">AuditEvent · más recientes primero</span></h3>
+      ${filasAud ? `<table class="t audtbl"><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Objeto</th><th>Antes → después</th><th>Config.</th></tr>${filasAud}</table>` : '<div class="empty">Sin cambios registrados</div>'}
+    </div>
+    <div class="section" style="overflow-x:auto">
+      <h3>Origen de las respuestas <span class="hint">Provenance · fragmentos: <span class="chip citado">citado</span> <span class="chip enviado">enviado al modelo</span> <span class="chip">recuperado</span></span></h3>
+      ${filasProv ? `<table class="t audtbl"><tr><th>Cuándo</th><th>Entrada</th><th>Decisión</th><th>Modelo</th><th>Versiones</th><th>Fragmentos RAG</th><th></th></tr>${filasProv}</table>` : '<div class="empty">Sin respuestas registradas</div>'}
+    </div>
+  </div>`,
+  );
+  if (audResaltar) {
+    const row = document.getElementById(`prov-${audResaltar}`);
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      audResaltar = null;
+    }
+  }
+}
+
 // ---------------- Eventos ----------------
 function switchTab(t) {
   if (!t) return;
@@ -750,9 +1180,19 @@ function switchTab(t) {
 }
 
 document.addEventListener('click', async (e) => {
+  const pv = e.target.closest('[data-prov]');
+  if (pv) {
+    audResaltar = pv.dataset.prov;
+    switchTab('auditoria');
+    return cargarAuditoria();
+  }
   const t = e.target.closest('button, .opt, .step');
   if (!t) return;
-  if (t.classList.contains('tab')) return switchTab(t.dataset.tab);
+  if (t.classList.contains('tab')) {
+    switchTab(t.dataset.tab);
+    if (t.dataset.tab === 'auditoria') cargarAuditoria();
+    return;
+  }
   if (t.classList.contains('step')) return switchTab(t.dataset.goto);
   if (t.id === 'btnImport') {
     await act('/api/hce/import', {}, 'Datos importados desde la HCE (mock FHIR)');
@@ -767,12 +1207,24 @@ document.addEventListener('click', async (e) => {
     configDraft = null;
     rendered.configSig = null;
     renderConfig();
-    if (isNew) toast('Asistente generado. Marta ya puede escribir; probá “Simular 14 días” o “Próxima toma”.');
+    if (isNew) toast('Asistente generado. Marta ya puede escribir; probá “Simular” (14 días de ejemplo o un plan JSON) o “Próxima toma”.');
     return;
+  }
+  if (t.id === 'btnSim') return $('#simMenu').classList.toggle('open');
+  if (t.id === 'btnPlan' || t.id === 'btnPlan2' || t.id === 'btnPlan3') return abrirPlanModal();
+  if (t.id === 'planClose' || t.id === 'planCancel') return cerrarPlanModal();
+  if (t.id === 'planFileBtn') return $('#planFile').click();
+  if (t.id === 'planRun') return ejecutarPlan();
+  if (t.id === 'btnPlanCancel') return act('/api/sim/plan/cancel', {}, 'Cancelando después del paso en curso…');
+  if (t.dataset.planEj != null) {
+    const p = PLANES[Number(t.dataset.planEj)];
+    $$('.plan-ej').forEach((b) => b.classList.toggle('sel', b === t));
+    return usarPlan(p.archivo, p.contenido);
   }
   if (t.id === 'btnNext') return act('/api/sim/next-dose');
   if (t.id === 'btnHour') return act('/api/sim/advance', { minutes: 60 });
   if (t.id === 'btnSeed') {
+    $('#simMenu').classList.remove('open');
     await act('/api/sim/seed', {}, 'Se generaron 14 días de seguimiento de ejemplo');
     switchTab('panel');
     return;
@@ -781,10 +1233,34 @@ document.addEventListener('click', async (e) => {
     if (!confirm('¿Reiniciar la demo? Se borran todos los datos simulados.')) return;
     configDraft = null;
     cdsCache = null;
+    vistaDatos = null;
     Object.keys(rendered).forEach((k) => delete rendered[k]);
     await act('/api/sim/reset', {}, 'Demo reiniciada');
     switchTab('config');
     return;
+  }
+  if (t.id === 'almAdd') {
+    alarmEdit = { id: 'nuevo', tipo: 'texto' };
+    return renderAlarmas();
+  }
+  if (t.id === 'almCancel') {
+    alarmEdit = null;
+    return renderAlarmas();
+  }
+  if (t.dataset.almEdit) {
+    const a = S.assistant.config.alarmas.find((x) => x.id === t.dataset.almEdit);
+    alarmEdit = a ? { id: a.id, tipo: a.tipo } : null;
+    return renderAlarmas();
+  }
+  if (t.dataset.almDel) {
+    const a = S.assistant.config.alarmas.find((x) => x.id === t.dataset.almDel);
+    if (!a || !confirm(`¿Eliminar la alarma “${a.nombre}”?`)) return;
+    return alarmOp('DELETE', `/api/alarms/${a.id}`, null, 'Alarma eliminada');
+  }
+  if (t.id === 'almSave') {
+    const id = t.dataset.id;
+    const datos = alarmFormData(id, alarmEdit.tipo);
+    return id === 'nuevo' ? alarmOp('POST', '/api/alarms', datos, 'Alarma agregada') : alarmOp('PUT', `/api/alarms/${id}`, datos, 'Alarma modificada');
   }
   if (t.dataset.ack) return act(`/api/alert/${t.dataset.ack}/ack`);
   if (t.dataset.reply) {
@@ -807,12 +1283,21 @@ document.addEventListener('click', async (e) => {
     $('#evq').value = '';
     return act('/api/evidence', { pregunta: v });
   }
-  if (t.id === 'btnShowBundle') window.__exported = true;
+  if (t.id === 'btnExportHce') return act('/api/hce/export', {}, 'Bundle enviado a la HCE');
   if (t.id === 'btnShowBundle' || t.id === 'btnShowHce') {
-    const pre = $('#bundleView');
-    const data = t.id === 'btnShowBundle' ? fhirCache.bundle : await api('/api/hce/bundle');
-    pre.textContent = JSON.stringify(data, null, 2);
-    pre.style.display = 'block';
+    const tipo = t.id === 'btnShowBundle' ? 'bundle' : 'hce';
+    if (vistaDatos && vistaDatos.tipo === tipo) {
+      vistaDatos = null; // cerrar: no consulta al servidor, no genera entrada en la auditoría
+    } else {
+      t.disabled = true;
+      try {
+        vistaDatos = { tipo, data: await api(tipo === 'bundle' ? '/api/fhir/bundle' : '/api/hce/bundle') }; // abrir: acceso auditado
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+    rendered['tab-fhir'] = null;
+    renderFhir();
     return;
   }
   if (t.id === 'btnCds') {
@@ -845,13 +1330,40 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.closest('#cfgForm')) readForm();
+  if (e.target.dataset.mod) renderForm(); // cambia qué metas y umbrales se muestran
+  if (e.target.dataset.almToggle) {
+    const on = e.target.checked;
+    alarmOp('PUT', `/api/alarms/${e.target.dataset.almToggle}`, { activa: on }, on ? 'Alarma reactivada' : 'Alarma pausada');
+  }
+  if (e.target.dataset.almTipo != null && alarmEdit) {
+    alarmEdit.tipo = e.target.value;
+    renderAlarmas();
+  }
   if (e.target.id === 'fileInput') chooseFile(e.target.files[0]);
+  if (e.target.id === 'trzAlcance') {
+    trazAlcance = e.target.value;
+    TRZ = null;
+    if (trazAlcance === 'historial') cargarTrazas();
+    else renderTraces();
+  }
+  if (e.target.id === 'audAlcance') {
+    audAlcance = e.target.value;
+    cargarAuditoria();
+  }
+  if (e.target.id === 'planFile' && e.target.files[0]) {
+    const f = e.target.files[0];
+    f.text().then((txt) => usarPlan(f.name, txt));
+    $$('.plan-ej').forEach((b) => b.classList.remove('sel'));
+    e.target.value = '';
+  }
 });
 document.addEventListener('input', (e) => {
   if (e.target.closest('#cfgForm')) readForm();
   if (e.target.id === 'txt') updateSendIcon();
+  if (e.target.id === 'planTxt') validarPlanTxt();
 });
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') cerrarPlanModal();
   if (e.key !== 'Enter') return;
   if (e.target.id === 'txt') sendText(e.target.value);
   if (e.target.id === 'caption') sendFile();
@@ -859,11 +1371,9 @@ document.addEventListener('keydown', (e) => {
   if (e.target.dataset && e.target.dataset.draft && e.target.dataset.draft.startsWith('rep-')) $(`[data-reply="${e.target.dataset.draft.slice(4)}"]`).click();
 });
 document.addEventListener('click', (e) => {
-  if (e.target.closest('a[href*="fhir/bundle"]')) {
-    window.__exported = true;
-    setTimeout(refresh, 300);
-  }
   if (!e.target.closest('#attachMenu') && !e.target.closest('#btnAttach')) $('#attachMenu').classList.remove('open');
+  if (!e.target.closest('.simwrap')) $('#simMenu').classList.remove('open');
+  if (e.target.id === 'planModal') cerrarPlanModal();
 });
 
 // ---------------- Inicio ----------------
@@ -875,5 +1385,11 @@ document.addEventListener('click', (e) => {
   } catch {}
   renderAttachMenu();
   await refresh();
-  setInterval(refresh, 2500);
+  // mientras corre una simulación con plan, se refresca más seguido
+  (function ciclo() {
+    setTimeout(async () => {
+      await refresh();
+      ciclo();
+    }, S && S.simulacion && S.simulacion.estado === 'corriendo' ? 1000 : 2500);
+  })();
 })();

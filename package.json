@@ -1,10 +1,12 @@
 {
   "name": "asistente-dm2",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Simulador del asistente conversacional basado en IA para adherencia y seguimiento de pacientes (caso Marta / Dra. Lucía, DM2)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node tests/run.js",
+    "logs:fhir": "node scripts/inyectar_fhir.js"
   },
   "engines": {
     "node": ">=18"

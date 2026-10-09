@@ -11,14 +11,28 @@ const A = require('./src/assistant');
 const V = require('./src/vision');
 const F = require('./src/fhir');
 const llm = require('./src/llm');
+const ALM = require('./src/alarmas');
+const CFG = require('./src/configuracion');
+const SIM = require('./src/simulacion');
+const T = require('./src/trazabilidad');
+const LOGS = require('./src/logs');
+const SEUD = require('./src/seudonimo');
 const hce = require('./src/mocks/hce');
 const OE = require('./src/mocks/openevidence');
 const { seed14 } = require('./src/seed');
-const { MODULOS_DISPONIBLES, getBase } = require('./src/rag');
+const MOD = require('./src/modulos');
+const TERM = require('./src/terminologia');
 const { uid, fmtDateTime } = require('./src/util');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+// Quién hace cada pedido (para la auditoría y la procedencia). El simulador no tiene login: el panel es la
+// Dra. Lucía y el teléfono es Marta. En un sistema real esto saldría de la autenticación.
+app.use((req, res, next) => {
+  const paciente = /^\/api\/(chat|reminder|slot)\b/.test(req.path);
+  const base = paciente ? T.ACTORES.paciente : T.ACTORES.medica;
+  T.conActor({ ...base, ip: req.ip || null }, next);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(S.UPLOADS_DIR));
 app.use('/muestras', express.static(path.join(__dirname, 'muestras')));
@@ -46,6 +60,12 @@ const wrap = (fn) => async (req, res) => {
     busy--;
   }
 };
+// Mientras corre una simulación con plan, la API no acepta cambios (sólo leer el estado o cancelar)
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' || !SIM.corriendo() || req.path === '/sim/plan/cancel') return next();
+  res.status(409).json({ error: 'Hay una simulación con plan en curso. Esperá a que termine o cancelala.' });
+});
+
 const needAssistant = () => {
   if (!S.get().assistant) throw new Error('Primero la médica debe configurar el asistente.');
 };
@@ -53,9 +73,11 @@ const needAssistant = () => {
 // ---------- Estado ----------
 app.get('/api/state', (req, res) => {
   const st = S.get();
+  if (st.assistant) ALM.ensure(st.assistant.config); // migra configuraciones guardadas antes de las alarmas configurables
   res.json({
     ...st,
-    busy: busy > 0,
+    busy: busy > 0 || SIM.corriendo(),
+    simulacion: SIM.estado(),
     clockText: fmtDateTime(st.clock),
     metrics: st.assistant ? C.metrics(14) : null,
     nextDose: st.assistant ? C.pendingDosesText() : null,
@@ -65,80 +87,68 @@ app.get('/api/state', (req, res) => {
 
 app.get('/api/catalog', (req, res) => {
   res.json({
+    alarmas: { variables: MOD.variables(), operadores: ALM.OPERADORES, origenes: ALM.origenes() },
     temas: A.TEMAS,
     niveles: A.NIVELES,
-    modulos: MODULOS_DISPONIBLES.map((m) => ({ ...m, fuente: m.disponible ? getBase(m.id).fuente : null, fragmentos: m.disponible ? getBase(m.id).fragmentos.map((f) => ({ id: f.id, titulo: f.titulo })) : [] })),
+    modulos: MOD.catalogo(),
+    umbralesGenerales: MOD.UMBRALES_GENERALES,
+    motivos: TERM.MOTIVOS,
   });
 });
 
 // ---------- Simulación ----------
-app.post('/api/sim/reset', wrap(() => { S.reset(); }));
-app.post('/api/sim/seed', wrap(() => {
-  needAssistant();
-  if (S.get().seeded) throw new Error('Los 14 días de ejemplo ya fueron generados. Reiniciá la demo para volver a empezar.');
-  seed14();
-}));
+app.post('/api/sim/reset', wrap(() => CFG.reiniciarDemo()));
+app.post('/api/sim/seed', wrap(() => { CFG.generarDatosEjemplo(seed14); }));
 app.post('/api/sim/next-dose', wrap(() => { needAssistant(); A.advanceToNextDose(); }));
 app.post('/api/sim/advance', wrap((req) => {
   needAssistant();
-  const min = Math.max(1, Math.min(24 * 60, Number(req.body.minutes) || 60));
-  const st = S.get();
-  const target = st.clock + min * 60e3;
-  // si hay tomas en el intervalo, se envían los recordatorios en orden
-  let t = C.nextDoseTime(st.clock);
-  while (t && t <= target) {
-    A.advanceTo(t, true);
-    t = C.nextDoseTime(st.clock);
-  }
-  A.advanceTo(target, false);
+  A.avanzar(Math.max(1, Math.min(24 * 60, Number(req.body.minutes) || 60)));
 }));
 
-// ---------- HCE (mock FHIR) ----------
-app.post('/api/hce/import', wrap(() => {
-  const b = hce.everything();
-  const st = S.get();
-  st.hce = hce.toSummary(b);
-  S.trace('Importación desde la HCE', [{ paso: 'HCE (mock FHIR)', detalle: `GET /Patient/${hce.PATIENT_ID}/$everything → ${b.entry.length} recursos` }]);
-  S.save();
-  return { summary: st.hce, bundle: b };
+// Simulación a demanda con un plan JSON (ver muestras/planes/)
+const PLANES_DIR = path.join(__dirname, 'muestras', 'planes');
+app.get('/api/sim/planes', (req, res) => {
+  const archivos = fs.existsSync(PLANES_DIR) ? fs.readdirSync(PLANES_DIR).filter((f) => f.endsWith('.json')).sort() : [];
+  res.json(
+    archivos.map((archivo) => {
+      const contenido = JSON.parse(fs.readFileSync(path.join(PLANES_DIR, archivo), 'utf8'));
+      const planes = Array.isArray(contenido.planes) ? contenido.planes : [contenido];
+      return { archivo, nombre: contenido.nombre || archivo, descripcion: contenido.descripcion || '', planes: planes.length, pasos: planes.reduce((n, p) => n + (p.pasos || []).length, 0), contenido };
+    }),
+  );
+});
+app.post('/api/sim/plan/validate', wrap((req) => {
+  const planes = SIM.validarPlanes(req.body.plan);
+  return { ok: true, planes: planes.length, pasos: planes.reduce((n, p) => n + p.pasos.length, 0) };
 }));
-app.get('/api/hce/bundle', (req, res) => res.json(hce.everything()));
+app.post('/api/sim/plan', wrap((req) => SIM.iniciar(req.body.plan, String(req.body.nombre || 'plan').slice(0, 120))));
+app.post('/api/sim/plan/cancel', wrap(() => SIM.cancelar()));
+app.get('/api/sim/plan', (req, res) => {
+  const e = SIM.estado();
+  if (!e) return res.status(404).json({ error: 'Todavía no se ejecutó ningún plan' });
+  res.json(e);
+});
+
+// ---------- HCE (mock FHIR) ----------
+app.post('/api/hce/import', wrap(() => CFG.importarHCE()));
+// Ver los datos de origen de la HCE es un acceso a datos identificados: queda auditado
+app.get('/api/hce/bundle', (req, res) => {
+  const b = hce.everything();
+  T.auditar({ accion: 'R', evento: 'Datos de la HCE consultados', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Registro de la paciente en la HCE' }, detalle: `${b.entry.length} recursos vistos en el panel`, versionAntes: null, versionDespues: null });
+  res.json(b);
+});
 app.get('/api/assistant/default', wrap(() => {
   const st = S.get();
   if (!st.hce) throw new Error('Importá primero los datos desde la HCE.');
   return A.defaultConfig(st.hce);
 }));
 
-app.post('/api/assistant', wrap((req) => {
-  const st = S.get();
-  if (!st.hce) throw new Error('Importá primero los datos desde la HCE.');
-  const cfg = req.body.config;
-  if (!cfg || !cfg.medicacion || !cfg.medicacion.length) throw new Error('Configuración inválida');
-  const nuevo = !st.assistant;
-  const prev = nuevo ? null : st.assistant.config;
-  st.assistant = { config: cfg, creado: nuevo ? st.clock : st.assistant.creado, actualizado: Date.now() };
-  // Si la médica cambia indicaciones u horarios, se le avisa a la paciente
-  if (prev) {
-    const avisos = [];
-    if ((prev.indicaciones || '') !== (cfg.indicaciones || '')) avisos.push(`📋 Nuevas indicaciones:\n${cfg.indicaciones || '(sin indicaciones adicionales)'}`);
-    const hs = (c) => c.medicacion.map((m) => `${m.nombre} a las ${m.horarios.join(' y ')}`).join('; ');
-    if (hs(prev) !== hs(cfg)) avisos.push(`⏰ Nuevos horarios de medicación: ${hs(cfg)}`);
-    if (avisos.length) C.addMessage({ from: 'asistente', kind: 'text', intent: 'otro', text: `Marta, la Dra. Lucía actualizó tu plan de cuidado.\n${avisos.join('\n')}` });
-  }
-  if (nuevo) {
-    C.addMessage({
-      from: 'asistente',
-      kind: 'text',
-      intent: 'otro',
-      text: `¡Hola, Marta! 👋 Soy tu asistente de seguimiento, configurado por la Dra. Lucía.\nTe voy a recordar tus remedios (${cfg.medicacion.map((m) => `${m.nombre} a las ${m.horarios.join(' y ')}`).join('; ')}), responder dudas sobre tu tratamiento, registrar tus valores y ayudarte con los turnos.\nPodés escribirme, mandarme audios o fotos del glucómetro, tensiómetro, remedios o análisis.\nNo reemplazo a tu médica: si algo lo tiene que ver ella, se lo paso. Ante una urgencia, llamá al 107.`,
-    });
-  }
-  S.trace(nuevo ? 'Asistente generado' : 'Configuración actualizada', [
-    { paso: 'Panel médico', detalle: `${cfg.id}: módulos ${cfg.modulos.join('+')}, ${cfg.temas.length} temas, nivel ${cfg.nivelLenguaje}, canal ${cfg.canal}` },
-    { paso: 'Instancia del LLM', detalle: 'Sin reentrenamiento: modelo general parametrizado por el plan de cuidado (prompt de sistema + RAG)' },
-  ]);
-  S.save();
-}));
+app.post('/api/assistant', wrap((req) => { CFG.guardarAsistente(req.body.config); }));
+
+// ---------- Alarmas (protocolo de urgencia) ----------
+app.post('/api/alarms', wrap((req) => CFG.agregarAlarma(req.body)));
+app.put('/api/alarms/:id', wrap((req) => CFG.modificarAlarma(req.params.id, req.body)));
+app.delete('/api/alarms/:id', wrap((req) => CFG.eliminarAlarma(req.params.id)));
 
 // ---------- Chat de la paciente ----------
 app.post('/api/chat/text', wrap(async (req) => {
@@ -175,13 +185,7 @@ app.get('/api/muestras', (req, res) => {
 
 app.post('/api/chat/sample', wrap(async (req) => {
   needAssistant();
-  const name = path.basename(String(req.body.archivo || ''));
-  const src = path.join(__dirname, 'muestras', name);
-  if (!fs.existsSync(src)) throw new Error('Muestra no encontrada');
-  const mime = name.endsWith('.pdf') ? 'application/pdf' : name.endsWith('.png') ? 'image/png' : 'image/jpeg';
-  const dest = `${uid('f')}${path.extname(name)}`;
-  fs.copyFileSync(src, path.join(S.UPLOADS_DIR, dest));
-  await V.handleFile({ path: path.join(S.UPLOADS_DIR, dest), mime, nombre: name, url: `/uploads/${dest}`, caption: String(req.body.caption || '').trim() });
+  await V.enviarMuestra(String(req.body.archivo || ''), String(req.body.caption || '').trim());
 }));
 
 app.post('/api/reminder/:id', wrap((req) => { A.answerReminder(req.params.id, !!req.body.tomada); }));
@@ -198,11 +202,7 @@ app.post('/api/alert/:id/ack', wrap((req) => {
   if (a) a.ack = true;
   S.save();
 }));
-app.post('/api/suggestion/:id', wrap((req) => {
-  const s = S.get().suggestions.find((x) => x.id === req.params.id);
-  if (s) s.estado = req.body.estado === 'aceptada' ? 'aceptada' : 'descartada';
-  S.save();
-}));
+app.post('/api/suggestion/:id', wrap((req) => CFG.resolverSugerencia(req.params.id, String(req.body.estado || ''))));
 app.post('/api/summary', wrap(async () => { needAssistant(); return A.preconsultaSummary(); }));
 app.post('/api/evidence', wrap((req) => {
   const q = String(req.body.pregunta || '').trim();
@@ -215,14 +215,60 @@ app.post('/api/evidence', wrap((req) => {
   return ev;
 }));
 
+// ---------- Trazabilidad y auditoría (logs/) ----------
+app.get('/api/auditoria', (req, res) => {
+  const sesion = req.query.alcance === 'todo' ? null : S.get().sesion;
+  const limite = Math.min(Number(req.query.limite) || 300, 2000);
+  res.json({
+    sesion: S.get().sesion,
+    alcance: sesion ? 'sesion' : 'todo',
+    auditoria: LOGS.leer('auditoria', { sesion, limite }),
+    procedencia: LOGS.leer('procedencia', { sesion, limite }),
+    integridad: { auditoria: LOGS.verificar('auditoria'), procedencia: LOGS.verificar('procedencia'), trazas: LOGS.verificar('trazas') },
+    seudonimo: SEUD.seudonimo(),
+    archivos: LOGS.archivos(),
+    versiones: T.versiones(),
+  });
+});
+
+// Historial de trazas (logs/trazas.jsonl, sin datos de la paciente)
+app.get('/api/trazas', (req, res) => {
+  const sesion = req.query.alcance === 'todo' ? null : S.get().sesion;
+  res.json({ sesion: S.get().sesion, trazas: LOGS.leer('trazas', { sesion, limite: Math.min(Number(req.query.limite) || 500, 5000) }), integridad: LOGS.verificar('trazas') });
+});
+
 // ---------- FHIR y CDS Hooks ----------
+// Los datos identificados no se descargan a archivos: se ven en el panel (acceso auditado) y salen sólo
+// por el envío a la HCE (exportación auditada).
+const resumenFhir = (b) => b.entry.reduce((m, e) => ({ ...m, [e.resource.resourceType]: (m[e.resource.resourceType] || 0) + 1 }), {});
+app.get('/api/fhir/resumen', (req, res) => {
+  // cantidades por tipo de recurso, sin datos de la paciente (para la pestaña, sin generar accesos)
+  res.json({ recursos: resumenFhir(F.bundle()), exportaciones: S.get().exportaciones || [] });
+});
 app.get('/api/fhir/bundle', (req, res) => {
   const b = F.bundle(`${req.protocol}://${req.get('host')}`);
-  if (req.query.download) res.setHeader('Content-Disposition', 'attachment; filename="marta-fhir-bundle.json"');
+  T.auditar({ accion: 'R', evento: 'Bundle FHIR consultado', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Bundle FHIR de la paciente' }, detalle: `${b.entry.length} recursos vistos en el panel`, versionAntes: null, versionDespues: null });
   res.type('application/fhir+json').send(JSON.stringify(b, null, 2));
 });
+app.post('/api/hce/export', wrap(() => {
+  needAssistant();
+  const st = S.get();
+  const b = F.bundle();
+  const recursos = resumenFhir(b);
+  const exp = { id: uid('exp'), ts: st.clock, real: Date.now(), recursos, total: b.entry.length, destino: 'HCE institucional (mock FHIR)' };
+  st.exportaciones = st.exportaciones || [];
+  st.exportaciones.push(exp);
+  T.auditar({ accion: 'E', categoria: 'exportacion', evento: 'Bundle enviado a la HCE', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Registro de la paciente en la HCE' }, detalle: `POST ${exp.destino}: ${b.entry.length} recursos (${Object.entries(recursos).map(([k, v]) => `${v} ${k}`).join(', ')})`, versionAntes: null, versionDespues: null });
+  S.trace('Exportación a la HCE', [{ paso: 'HCE (mock FHIR)', detalle: `Bundle transaction con ${b.entry.length} recursos enviado a ${exp.destino}` }]);
+  S.save();
+  return exp;
+}));
 app.get('/cds-services', (req, res) => res.json(F.DISCOVERY));
-app.post('/cds-services/seguimiento-entre-consultas', (req, res) => res.json(F.cdsCards()));
+app.post('/cds-services/seguimiento-entre-consultas', (req, res) => {
+  const r = F.cdsCards();
+  T.auditar({ accion: 'R', evento: 'Registro consultado vía CDS Hooks (patient-view)', objeto: { tipo: 'hce', id: hce.PATIENT_ID, nombre: 'Tarjetas CDS para la HCE' }, detalle: `${r.cards.length} tarjetas entregadas a la HCE`, versionAntes: null, versionDespues: null });
+  res.json(r);
+});
 
 const PORT = Number(process.env.PORT) || 3000;
 llm.init().then((s) => {

@@ -1,0 +1,39 @@
+{
+  "descripcion": "Terminologías que usa el export FHIR. Los códigos SNOMED CT se confirmaron a mano el 08/10/2026 en páginas públicas (tx.fhir.org, BioPortal, FindACode, OpenCodelists, CH EMED), no en un servidor de terminología oficial: el detalle por código está en el README (Origen de los códigos de terminología). Antes de un uso real deben validarse contra la edición nacional vigente.",
+  "sistemas": {
+    "snomed": "http://snomed.info/sct",
+    "ucum": "http://unitsofmeasure.org",
+    "loinc": "http://loinc.org"
+  },
+  "motivosDerivacion": [
+    { "clave": "consulta", "code": "11429006", "display": "Consultation", "etiqueta": "Consulta general o tema no habilitado (por defecto)" },
+    { "clave": "sintoma_dolor_toracico", "code": "29857009", "display": "Chest pain", "etiqueta": "Dolor torácico" },
+    { "clave": "sintoma_disnea", "code": "267036007", "display": "Dyspnea", "etiqueta": "Falta de aire" },
+    { "clave": "sintoma_fiebre", "code": "386661006", "display": "Fever", "etiqueta": "Fiebre" },
+    { "clave": "sintoma_tos", "code": "49727002", "display": "Cough", "etiqueta": "Tos" },
+    { "clave": "sintoma_parestesia", "code": "91019004", "display": "Paresthesia", "etiqueta": "Hormigueo o adormecimiento" },
+    { "clave": "sintoma_sangrado", "code": "131148009", "display": "Bleeding", "etiqueta": "Sangrado" },
+    { "clave": "herida", "code": "416462003", "display": "Wound", "etiqueta": "Herida o lesión" },
+    { "clave": "hipoglucemia", "code": "302866003", "display": "Hypoglycemia", "etiqueta": "Glucemia baja" },
+    { "clave": "hiperglucemia", "code": "80394007", "display": "Hyperglycemia", "etiqueta": "Glucemia alta" },
+    { "clave": "presion_alta", "code": "24184005", "display": "Finding of increased blood pressure", "etiqueta": "Presión alta" },
+    { "clave": "efecto_adverso", "code": "281647001", "display": "Adverse reaction", "etiqueta": "Posible efecto adverso de un medicamento" },
+    { "clave": "medicacion", "code": "182836005", "display": "Review of medication", "etiqueta": "Consulta sobre la medicación o pedido de cambio de tratamiento" }
+  ],
+  "ucum": {
+    "mg/dl": "mg/dL",
+    "mg/dL": "mg/dL",
+    "%": "%",
+    "mmhg": "mm[Hg]",
+    "mmHg": "mm[Hg]",
+    "mm[Hg]": "mm[Hg]",
+    "mg/g": "mg/g",
+    "kg": "kg",
+    "g/dl": "g/dL",
+    "g/dL": "g/dL",
+    "mmol/l": "mmol/L",
+    "mmol/L": "mmol/L",
+    "/min": "/min",
+    "lpm": "/min"
+  }
+}
