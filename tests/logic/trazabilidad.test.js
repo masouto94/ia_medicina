@@ -205,7 +205,7 @@ test('auditoría y procedencia por la API (modo simulado)', async (t) => {
   });
 
   await t.test('el seudónimo es estable con la misma clave y distinto con otra (re-identificable sólo desde el sistema)', () => {
-    const calc = (clave) => spawnSync(process.execPath, ['-e', `process.stdout.write(require(${JSON.stringify(path.join(RAIZ, 'src', 'seudonimo'))}).seudonimo('marta-001'))`], { env: { ...process.env, ENCRYPTION_KEY: clave, DATA_DIR: srv.dataDir }, encoding: 'utf8' }).stdout;
+    const calc = (clave) => spawnSync(process.execPath, ['-e', `process.stdout.write(require(${JSON.stringify(path.join(RAIZ, 'src', 'seudonimo'))}).seudonimo('marta-001'))`], { env: { ...process.env, HASH_KEY: clave, DATA_DIR: srv.dataDir }, encoding: 'utf8' }).stdout;
     assert.equal(calc('clave-a'), calc('clave-a'));
     assert.notEqual(calc('clave-a'), calc('clave-b'));
     assert.match(calc('clave-a'), /^pac-[0-9a-f]{16}$/);

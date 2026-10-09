@@ -243,7 +243,7 @@ logs/
 - **Sin datos personales: seudónimo.** Los logs no llevan el nombre, el documento, el teléfono, la fecha de nacimiento ni el id de la paciente en la HCE.
   - La paciente figura con un seudónimo estable: `pac-` + HMAC-SHA256 (clave, id en la HCE). Es siempre el mismo, así sus registros se relacionan entre sí y se pueden auditar.
   - Sólo el sistema, que tiene la clave, puede saber a qué persona corresponde. La pestaña *Auditoría* muestra el seudónimo de la paciente actual.
-  - La clave sale de `ENCRYPTION_KEY` en `.env`. Si no está, se genera una vez en `data/.clave-seudonimo`. Si se pierde la clave, los registros siguen relacionados entre sí, pero ya no se pueden vincular a la persona.
+  - La clave sale de `HASH_KEY` en `.env`. Si no está, se genera una vez en `data/.clave-seudonimo`. Si se pierde la clave, los registros siguen relacionados entre sí, pero ya no se pueden vincular a la persona.
 - **Sin texto de la paciente.** Del texto de los mensajes sólo queda el id y la huella SHA-256. En las trazas se reemplaza lo que dijo la paciente y lo que el modelo redactó a partir de eso (el tema, el motivo de derivación, el fundamento de una alarma) por `"[texto]"`. La configuración auditada conserva los valores clínicos (umbrales, medicación) para poder auditar sus cambios, pero no los datos de la paciente.
 - **Nada se descarga desde la app.** Los datos identificados se ven en pantalla, y cada vista queda auditada. Salen del sistema sólo con **Enviar a la HCE**, que queda auditado como exportación (`AuditEvent` tipo DICOM 110106 *Export*). Los logs salen sólo con el script de inyección.
 - **FHIR.**
