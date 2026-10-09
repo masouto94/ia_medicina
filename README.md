@@ -1,4 +1,4 @@
-# Asistente IA de seguimiento entre consultas: simulador
+# Acompañante Terapéutico con Inteligencia Artificial (ATIA)
 
 Esta app simula el flujo propuesto en el trabajo *“Propuesta de un asistente conversacional basado en IA para la adherencia terapéutica y el seguimiento de pacientes”*. Usa el caso ilustrativo del trabajo: Marta (DM2 + HTA) y la Dra. Lucía, su médica de cabecera.
 
