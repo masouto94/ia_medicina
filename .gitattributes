@@ -1,0 +1,3 @@
+# Los .bat necesitan fin de linea CRLF para que CMD los ejecute bien; los .sh, LF.
+*.bat text eol=crlf
+*.sh text eol=lf

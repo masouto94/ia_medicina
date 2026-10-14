@@ -166,6 +166,18 @@ Hay dos planes de ejemplo en `muestras/planes/`: *Un día de Marta* (un día com
 
 ## Cómo correrla
 
+### En Windows: doble clic en `iniciar.bat`
+
+Abrí la carpeta del proyecto y hacé doble clic en **`iniciar.bat`**. También se puede correr desde CMD con `iniciar.bat` o desde PowerShell con `.\iniciar.bat`. El lanzador:
+
+1. verifica que esté instalado Node.js;
+2. instala las dependencias la primera vez (`npm install`);
+3. crea `.env` a partir de `.env.example` si no existe;
+4. lee el token de Claude Code de `.env` y avisa si no hay sesión (en ese caso la app usa el modo simulado);
+5. arranca la app y abre el navegador en `http://localhost:3000` (o en el `PORT` de `.env`).
+
+Para frenarla: `Ctrl+C` o cerrar la ventana. Si la app se cierra con un error, la ventana queda abierta para leerlo.
+
 ### Vía script de inicialización de bash
 
 ```bash
